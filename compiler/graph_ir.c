@@ -178,6 +178,23 @@ static BwppShape bwpp_shape_broadcast(const BwppShape *a, const BwppShape *b) {
   return out;
 }
 
+static int bwpp_shape_equal(const BwppShape *a, const BwppShape *b) {
+  if (a->rank != b->rank) {
+    return 0;
+  }
+  for (uint32_t i = 0; i < a->rank; ++i) {
+    if (!bwpp_str_eq_str(a->dims[i], b->dims[i])) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static BwppStr bwpp_shape_one_dim(void) {
+  BwppStr one = { "1", 1 };
+  return one;
+}
+
 static uint32_t bwpp_graph_add_value(BwppGraph *g, BwppGraphValue v) {
   if (g->value_count == g->value_capacity) {
     uint32_t new_cap = g->value_capacity == 0 ? 16 : g->value_capacity * 2;
@@ -492,6 +509,9 @@ static uint32_t bwpp_parse_primary(BwppGraphParser *p, BwppGraphBuilder *b) {
         }
         BwppGraphOpKind op = bwpp_tok_is(&tok, "reduce_sum") ? BWPP_GOP_REDUCE_SUM : BWPP_GOP_REDUCE_MAX;
         BwppShape out_shape = b->graph->values[input].shape;
+        if (attr.has_axis && attr.axis >= 0 && (uint32_t)attr.axis < out_shape.rank) {
+          out_shape.dims[attr.axis] = bwpp_shape_one_dim();
+        }
         return bwpp_graph_add_op_node(b->graph, op, args, argc, &attr, &out_shape,
                                       b->graph->values[input].dtype,
                                       b->graph->values[input].layout,
@@ -969,6 +989,76 @@ static uint32_t bwpp_graph_import_activation(BwppGraph *dst,
   return id;
 }
 
+static uint32_t bwpp_graph_const_scalar(BwppGraph *g, const char *name, BwppDType dtype) {
+  BwppGraphValue v = {0};
+  v.name.ptr = name;
+  v.name.len = strlen(name);
+  v.dtype = dtype;
+  v.layout = BWPP_LAYOUT_UNKNOWN;
+  v.shape.rank = 0;
+  v.producer = BWPP_GRAPH_NO_NODE;
+  v.flags = BWPP_GRAPH_VALUE_CONST;
+  return bwpp_graph_add_value(g, v);
+}
+
+static uint32_t bwpp_graph_negate(BwppGraph *g, uint32_t val) {
+  uint32_t c = bwpp_graph_const_scalar(g, "-1", g->values[val].dtype);
+  uint32_t inputs[2] = { val, c };
+  BwppShape out_shape = g->values[val].shape;
+  BwppGraphAttr attr = {0};
+  return bwpp_graph_add_op_node(g, BWPP_GOP_MUL, inputs, 2, &attr, &out_shape,
+                                g->values[val].dtype,
+                                g->values[val].layout,
+                                0);
+}
+
+static uint32_t bwpp_graph_reduce_to_shape(BwppGraph *g,
+                                           uint32_t val,
+                                           const BwppShape *target_shape) {
+  BwppShape cur = g->values[val].shape;
+  if (bwpp_shape_equal(&cur, target_shape)) {
+    return val;
+  }
+  uint32_t cur_rank = cur.rank;
+  uint32_t tgt_rank = target_shape->rank;
+  for (uint32_t axis = 0; axis < cur_rank; ++axis) {
+    int tgt_idx = (int)axis - (int)(cur_rank - tgt_rank);
+    int reduce = 0;
+    if (tgt_idx < 0) {
+      reduce = 1;
+    } else {
+      BwppStr tgt_dim = target_shape->dims[tgt_idx];
+      BwppStr cur_dim = cur.dims[axis];
+      if (bwpp_str_eq(tgt_dim, "1") && !bwpp_str_eq(cur_dim, "1")) {
+        reduce = 1;
+      }
+    }
+    if (reduce) {
+      BwppGraphAttr attr = {0};
+      attr.has_axis = 1;
+      attr.axis = (int)axis;
+      BwppShape out_shape = cur;
+      out_shape.dims[axis] = bwpp_shape_one_dim();
+      uint32_t inputs[1] = { val };
+      val = bwpp_graph_add_op_node(g, BWPP_GOP_REDUCE_SUM, inputs, 1, &attr, &out_shape,
+                                   g->values[val].dtype,
+                                   g->values[val].layout,
+                                   0);
+      cur = out_shape;
+    }
+  }
+  if (cur.rank != target_shape->rank && target_shape->rank > 0) {
+    BwppGraphAttr attr = {0};
+    attr.shape = *target_shape;
+    uint32_t inputs[1] = { val };
+    val = bwpp_graph_add_op_node(g, BWPP_GOP_RESHAPE, inputs, 1, &attr, target_shape,
+                                 g->values[val].dtype,
+                                 g->values[val].layout,
+                                 0);
+  }
+  return val;
+}
+
 static uint32_t bwpp_graph_accum_grad(BwppGraph *g, uint32_t existing, uint32_t add_val) {
   if (existing == BWPP_GRAPH_NO_VALUE) {
     return add_val;
@@ -1083,15 +1173,73 @@ BwppGraph *bwpp_graph_autodiff(const BwppGraph *graph) {
     }
 
     if ((n->op == BWPP_GOP_ADD || n->op == BWPP_GOP_SUB) && n->input_count >= 2) {
-      grad_map[n->inputs[0]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[0]], dY);
-      grad_map[n->inputs[1]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[1]], dY);
+      BwppShape shape_a = graph->values[n->inputs[0]].shape;
+      BwppShape shape_b = graph->values[n->inputs[1]].shape;
+      uint32_t dA = bwpp_graph_reduce_to_shape(grad, dY, &shape_a);
+      uint32_t dB = bwpp_graph_reduce_to_shape(grad, dY, &shape_b);
+      if (n->op == BWPP_GOP_SUB) {
+        dB = bwpp_graph_negate(grad, dB);
+      }
+      grad_map[n->inputs[0]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[0]], dA);
+      grad_map[n->inputs[1]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[1]], dB);
       continue;
     }
 
-    if ((n->op == BWPP_GOP_MUL || n->op == BWPP_GOP_DIV) && n->input_count >= 2) {
-      /* Placeholder: treat as pass-through for now. */
-      grad_map[n->inputs[0]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[0]], dY);
-      grad_map[n->inputs[1]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[1]], dY);
+    if (n->op == BWPP_GOP_MUL && n->input_count >= 2) {
+      uint32_t actA = bwpp_graph_import_activation(grad, graph, act_map, n->inputs[0]);
+      uint32_t actB = bwpp_graph_import_activation(grad, graph, act_map, n->inputs[1]);
+      uint32_t inputsA[2] = { dY, actB };
+      uint32_t inputsB[2] = { dY, actA };
+      BwppShape out_shape = grad->values[dY].shape;
+      BwppGraphAttr attr = {0};
+      uint32_t dA = bwpp_graph_add_op_node(grad, BWPP_GOP_MUL, inputsA, 2, &attr, &out_shape,
+                                           grad->values[dY].dtype,
+                                           grad->values[dY].layout,
+                                           0);
+      uint32_t dB = bwpp_graph_add_op_node(grad, BWPP_GOP_MUL, inputsB, 2, &attr, &out_shape,
+                                           grad->values[dY].dtype,
+                                           grad->values[dY].layout,
+                                           0);
+      dA = bwpp_graph_reduce_to_shape(grad, dA, &graph->values[n->inputs[0]].shape);
+      dB = bwpp_graph_reduce_to_shape(grad, dB, &graph->values[n->inputs[1]].shape);
+      grad_map[n->inputs[0]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[0]], dA);
+      grad_map[n->inputs[1]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[1]], dB);
+      continue;
+    }
+
+    if (n->op == BWPP_GOP_DIV && n->input_count >= 2) {
+      uint32_t actA = bwpp_graph_import_activation(grad, graph, act_map, n->inputs[0]);
+      uint32_t actB = bwpp_graph_import_activation(grad, graph, act_map, n->inputs[1]);
+      BwppGraphAttr attr = {0};
+      uint32_t dA_inputs[2] = { dY, actB };
+      uint32_t dA = bwpp_graph_add_op_node(grad, BWPP_GOP_DIV, dA_inputs, 2, &attr,
+                                           &grad->values[dY].shape,
+                                           grad->values[dY].dtype,
+                                           grad->values[dY].layout,
+                                           0);
+      uint32_t b2_inputs[2] = { actB, actB };
+      uint32_t b2 = bwpp_graph_add_op_node(grad, BWPP_GOP_MUL, b2_inputs, 2, &attr,
+                                           &grad->values[actB].shape,
+                                           grad->values[actB].dtype,
+                                           grad->values[actB].layout,
+                                           0);
+      uint32_t num_inputs[2] = { dY, actA };
+      uint32_t num = bwpp_graph_add_op_node(grad, BWPP_GOP_MUL, num_inputs, 2, &attr,
+                                            &grad->values[dY].shape,
+                                            grad->values[dY].dtype,
+                                            grad->values[dY].layout,
+                                            0);
+      uint32_t dB_inputs[2] = { num, b2 };
+      uint32_t dB = bwpp_graph_add_op_node(grad, BWPP_GOP_DIV, dB_inputs, 2, &attr,
+                                           &grad->values[num].shape,
+                                           grad->values[num].dtype,
+                                           grad->values[num].layout,
+                                           0);
+      dB = bwpp_graph_negate(grad, dB);
+      dA = bwpp_graph_reduce_to_shape(grad, dA, &graph->values[n->inputs[0]].shape);
+      dB = bwpp_graph_reduce_to_shape(grad, dB, &graph->values[n->inputs[1]].shape);
+      grad_map[n->inputs[0]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[0]], dA);
+      grad_map[n->inputs[1]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[1]], dB);
       continue;
     }
 
@@ -1188,6 +1336,20 @@ BwppGraph *bwpp_graph_autodiff(const BwppGraph *graph) {
       continue;
     }
 
+    if (n->op == BWPP_GOP_REDUCE_SUM && n->input_count >= 1) {
+      if (!bwpp_shape_equal(&graph->values[n->inputs[0]].shape, &grad->values[dY].shape)) {
+        fprintf(stderr, "autodiff: reduce_sum broadcast expand not implemented\n");
+      }
+      grad_map[n->inputs[0]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[0]], dY);
+      continue;
+    }
+
+    if (n->op == BWPP_GOP_REDUCE_MAX && n->input_count >= 1) {
+      fprintf(stderr, "autodiff: reduce_max grad not implemented\n");
+      grad_map[n->inputs[0]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[0]], dY);
+      continue;
+    }
+
     fprintf(stderr, "autodiff: op %s not supported yet\n", bwpp_op_name(n->op));
   }
 
@@ -1215,4 +1377,53 @@ void bwpp_graph_destroy(BwppGraph *graph) {
   free(graph->regions);
   free(graph->outputs);
   free(graph);
+}
+
+int bwpp_graph_detect_attention(const BwppGraph *graph) {
+  if (!graph) {
+    return 0;
+  }
+  for (uint32_t i = 0; i < graph->node_count; ++i) {
+    const BwppGraphNode *mm = &graph->nodes[i];
+    if (mm->op != BWPP_GOP_MATMUL || mm->input_count < 2) {
+      continue;
+    }
+    int has_transpose = 0;
+    for (uint32_t j = 0; j < mm->input_count; ++j) {
+      uint32_t v = mm->inputs[j];
+      if (v < graph->value_count) {
+        uint32_t prod = graph->values[v].producer;
+        if (prod != BWPP_GRAPH_NO_NODE && prod < graph->node_count &&
+            graph->nodes[prod].op == BWPP_GOP_TRANSPOSE) {
+          has_transpose = 1;
+          break;
+        }
+      }
+    }
+    if (!has_transpose) {
+      continue;
+    }
+    uint32_t scores = mm->output;
+    uint32_t softmax_node = BWPP_GRAPH_NO_NODE;
+    for (uint32_t j = 0; j < graph->node_count; ++j) {
+      const BwppGraphNode *s = &graph->nodes[j];
+      if (s->op == BWPP_GOP_SOFTMAX && s->input_count >= 1 && s->inputs[0] == scores) {
+        softmax_node = j;
+        break;
+      }
+    }
+    if (softmax_node == BWPP_GRAPH_NO_NODE) {
+      continue;
+    }
+    uint32_t probs = graph->nodes[softmax_node].output;
+    for (uint32_t j = 0; j < graph->node_count; ++j) {
+      const BwppGraphNode *mm2 = &graph->nodes[j];
+      if (mm2->op == BWPP_GOP_MATMUL && mm2->input_count >= 2) {
+        if (mm2->inputs[0] == probs || mm2->inputs[1] == probs) {
+          return 1;
+        }
+      }
+    }
+  }
+  return 0;
 }

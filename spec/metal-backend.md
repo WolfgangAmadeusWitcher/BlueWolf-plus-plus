@@ -23,6 +23,8 @@
 ## Metadata
 - Each emitted kernel includes metadata for op counts and reversible regions.
 - Reversible policy is recorded (`store`, `recompute`, `auto`).
+- `fused_attention_candidate=1` is appended when the graph matches the
+  QK^T → softmax → V pattern (experimental, v0.1 stub).
 
 ## Device profiles
 - GPU-first targeting Apple Silicon (M4-class default).

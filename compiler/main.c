@@ -1,6 +1,7 @@
 #include "codegen_metal.h"
 #include "graph_ir.h"
 #include "ir.h"
+#include "mem_plan.h"
 #include "parser.h"
 #include "typecheck.h"
 #include <stdio.h>
@@ -41,6 +42,8 @@ int main(int argc, char **argv) {
   const char *output_path = NULL;
   const char *dot_path = NULL;
   const char *grad_dot_path = NULL;
+  const char *mem_plan_path = NULL;
+  int attn_report = 0;
 
   for (int i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--dot") == 0 && i + 1 < argc) {
@@ -49,6 +52,14 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[i], "--grad-dot") == 0 && i + 1 < argc) {
       grad_dot_path = argv[++i];
+      continue;
+    }
+    if (strcmp(argv[i], "--mem-plan") == 0 && i + 1 < argc) {
+      mem_plan_path = argv[++i];
+      continue;
+    }
+    if (strcmp(argv[i], "--attn-report") == 0) {
+      attn_report = 1;
       continue;
     }
     if (!input_path) {
@@ -62,7 +73,9 @@ int main(int argc, char **argv) {
   }
 
   if (!input_path || !output_path) {
-    fprintf(stderr, "usage: %s <input.bwpp> <output.metal> [--dot <graph.dot>] [--grad-dot <grad.dot>]\n",
+    fprintf(stderr,
+            "usage: %s <input.bwpp> <output.metal> [--dot <graph.dot>] [--grad-dot <grad.dot>]\n"
+            "       [--mem-plan <plan.txt>] [--attn-report]\n",
             argv[0]);
     return 1;
   }
@@ -99,7 +112,7 @@ int main(int argc, char **argv) {
   }
 
   BwppGraph *graph = NULL;
-  if (dot_path || grad_dot_path) {
+  if (dot_path || grad_dot_path || mem_plan_path || attn_report) {
     graph = bwpp_graph_build(module);
   }
 
@@ -129,6 +142,22 @@ int main(int argc, char **argv) {
     }
   }
 
+  if (mem_plan_path && graph) {
+    BwppMemPlan *plan = bwpp_mem_plan_build(graph);
+    if (!plan) {
+      fprintf(stderr, "failed to build mem plan\n");
+    } else {
+      FILE *out = fopen(mem_plan_path, "w");
+      if (!out) {
+        fprintf(stderr, "failed to open mem plan output: %s\n", mem_plan_path);
+      } else {
+        bwpp_mem_plan_dump(plan, out);
+        fclose(out);
+      }
+      bwpp_mem_plan_destroy(plan);
+    }
+  }
+
   if (bwpp_codegen_metal(ir, output_path) != BWPP_OK) {
     fprintf(stderr, "codegen failed\n");
     bwpp_graph_destroy(graph);
@@ -136,6 +165,20 @@ int main(int argc, char **argv) {
     bwpp_ast_module_destroy(module);
     free(src);
     return 1;
+  }
+
+  if (graph) {
+    int has_attention = bwpp_graph_detect_attention(graph);
+    if (attn_report) {
+      fprintf(stderr, "attention_candidate=%d\n", has_attention);
+    }
+    if (has_attention) {
+      FILE *out = fopen(output_path, "a");
+      if (out) {
+        fputs("\n// bwpp.meta: fused_attention_candidate=1\n", out);
+        fclose(out);
+      }
+    }
   }
 
   bwpp_graph_destroy(graph);

@@ -122,5 +122,6 @@ BwppGraph *bwpp_graph_autodiff(const BwppGraph *graph);
 void bwpp_graph_destroy(BwppGraph *graph);
 void bwpp_graph_dump(const BwppGraph *graph, FILE *out);
 void bwpp_graph_dump_dot(const BwppGraph *graph, FILE *out);
+int bwpp_graph_detect_attention(const BwppGraph *graph);
 
 #endif

@@ -10,6 +10,7 @@ SRCS = \
   typecheck.c \
   ir.c \
   graph_ir.c \
+  mem_plan.c \
   tile_ir.c \
   codegen_metal.c
 

@@ -44,12 +44,17 @@ See `ROADMAP.md`.
 - CPU ref tests: `make -C runtime/cpu` then `./runtime/cpu/bwpp_cpu_test` and `./runtime/cpu/bwpp_cpu_norm_test`
 - CPU Metal-parity tests (generate `.metal` from examples and validate via CPU ref):
   `make -C runtime/cpu cpu-metal-tests`
+- Memory planner report:
+  `./compiler/bwppc examples/norms.bwpp out_norm.metal --mem-plan mem_plan.txt`
 
 ## Graphviz
 Generate a forward graph + autodiff graph as DOT files:
 `./compiler/bwppc examples/norms.bwpp out_norm.metal --dot out.dot --grad-dot out_grad.dot`
 Render to PNG:
 `dot -Tpng out.dot -o out.png && dot -Tpng out_grad.dot -o out_grad.png`
+
+Attention candidate report (prints to stderr, annotates `.metal` if detected):
+`./compiler/bwppc examples/attention.bwpp out_attention.metal --attn-report`
 
 ## License
 Apache-2.0.
