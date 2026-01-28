@@ -52,6 +52,7 @@ See `ROADMAP.md`.
 - Build CPU benchmark: `make -C bench`
 - Run: `./bench/bwpp_bench --iters 10 --m 256 --n 256 --k 256`
 - Include Metal metadata: `./bench/bwpp_bench --metal out_tiny.metal`
+- Compare against MLX (Metal baseline, optional): `python3 bench/bench_compare.py`
 
 ## Graphviz
 Generate a forward graph + autodiff graph as DOT files:

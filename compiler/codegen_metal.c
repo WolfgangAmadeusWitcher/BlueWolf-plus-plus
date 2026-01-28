@@ -357,6 +357,9 @@ BwppStatus bwpp_codegen_metal(const BwppIrModule *ir, const char *out_path) {
       fprintf(f, "#define TILE_M %u\n", tile_m);
       fprintf(f, "#define TILE_N %u\n", tile_n);
       fprintf(f, "#define TILE_K %u\n\n", tile_k);
+      fprintf(f, "#define BWPP_BLOCK_M %u\n", tile->block.m);
+      fprintf(f, "#define BWPP_BLOCK_N %u\n", tile->block.n);
+      fprintf(f, "#define BWPP_BLOCK_K %u\n\n", tile->block.k);
       int ep_add = 0;
       int ep_silu = 0;
       if (epi) {
@@ -444,6 +447,8 @@ BwppStatus bwpp_codegen_metal(const BwppIrModule *ir, const char *out_path) {
     }
   }
   if (has_softmax) {
+    uint32_t softmax_tile = tile ? tile->block.n : 128;
+    fprintf(f, "\n#define BWPP_SOFTMAX_TILE %u\n", softmax_tile);
     fputs("\nstruct BwppSoftmaxParams {\n", f);
     fputs("  uint rows;\n", f);
     fputs("  uint cols;\n", f);
@@ -457,23 +462,34 @@ BwppStatus bwpp_codegen_metal(const BwppIrModule *ir, const char *out_path) {
     fputs("  uint row = gid;\n", f);
     fputs("  if (row >= p.rows) { return; }\n", f);
     fputs("  float maxv = -INFINITY;\n", f);
-    fputs("  for (uint c = 0; c < p.cols; ++c) {\n", f);
-    fputs("    float v = float(X[row * p.ld + c]);\n", f);
-    fputs("    maxv = max(maxv, v);\n", f);
+    fputs("  for (uint c0 = 0; c0 < p.cols; c0 += BWPP_SOFTMAX_TILE) {\n", f);
+    fputs("    uint cmax = min(c0 + BWPP_SOFTMAX_TILE, p.cols);\n", f);
+    fputs("    for (uint c = c0; c < cmax; ++c) {\n", f);
+    fputs("      float v = float(X[row * p.ld + c]);\n", f);
+    fputs("      maxv = max(maxv, v);\n", f);
+    fputs("    }\n", f);
     fputs("  }\n", f);
     fputs("  float sum = 0.0f;\n", f);
-    fputs("  for (uint c = 0; c < p.cols; ++c) {\n", f);
-    fputs("    float e = exp(float(X[row * p.ld + c]) - maxv);\n", f);
-    fputs("    Y[row * p.ld + c] = half(e);\n", f);
-    fputs("    sum += e;\n", f);
+    fputs("  for (uint c0 = 0; c0 < p.cols; c0 += BWPP_SOFTMAX_TILE) {\n", f);
+    fputs("    uint cmax = min(c0 + BWPP_SOFTMAX_TILE, p.cols);\n", f);
+    fputs("    for (uint c = c0; c < cmax; ++c) {\n", f);
+    fputs("      float e = exp(float(X[row * p.ld + c]) - maxv);\n", f);
+    fputs("      Y[row * p.ld + c] = half(e);\n", f);
+    fputs("      sum += e;\n", f);
+    fputs("    }\n", f);
     fputs("  }\n", f);
     fputs("  float inv = sum > 0.0f ? (1.0f / sum) : 0.0f;\n", f);
-    fputs("  for (uint c = 0; c < p.cols; ++c) {\n", f);
-    fputs("    Y[row * p.ld + c] = half(float(Y[row * p.ld + c]) * inv);\n", f);
+    fputs("  for (uint c0 = 0; c0 < p.cols; c0 += BWPP_SOFTMAX_TILE) {\n", f);
+    fputs("    uint cmax = min(c0 + BWPP_SOFTMAX_TILE, p.cols);\n", f);
+    fputs("    for (uint c = c0; c < cmax; ++c) {\n", f);
+    fputs("      Y[row * p.ld + c] = half(float(Y[row * p.ld + c]) * inv);\n", f);
+    fputs("    }\n", f);
     fputs("  }\n", f);
     fputs("}\n", f);
   }
   if (has_rmsnorm) {
+    uint32_t rms_tile = tile ? tile->block.n : 128;
+    fprintf(f, "\n#define BWPP_RMSNORM_TILE %u\n", rms_tile);
     fputs("\nstruct BwppRmsnormParams {\n", f);
     fputs("  uint rows;\n", f);
     fputs("  uint cols;\n", f);
@@ -490,16 +506,22 @@ BwppStatus bwpp_codegen_metal(const BwppIrModule *ir, const char *out_path) {
     fputs("  uint row = gid;\n", f);
     fputs("  if (row >= p.rows) { return; }\n", f);
     fputs("  float sumsq = 0.0f;\n", f);
-    fputs("  for (uint c = 0; c < p.cols; ++c) {\n", f);
-    fputs("    float v = float(X[row * p.ld + c]);\n", f);
-    fputs("    sumsq += v * v;\n", f);
+    fputs("  for (uint c0 = 0; c0 < p.cols; c0 += BWPP_RMSNORM_TILE) {\n", f);
+    fputs("    uint cmax = min(c0 + BWPP_RMSNORM_TILE, p.cols);\n", f);
+    fputs("    for (uint c = c0; c < cmax; ++c) {\n", f);
+    fputs("      float v = float(X[row * p.ld + c]);\n", f);
+    fputs("      sumsq += v * v;\n", f);
+    fputs("    }\n", f);
     fputs("  }\n", f);
     fputs("  float inv = rsqrt(sumsq / float(p.cols) + p.eps);\n", f);
-    fputs("  for (uint c = 0; c < p.cols; ++c) {\n", f);
-    fputs("    float v = float(X[row * p.ld + c]) * inv;\n", f);
-    fputs("    float g = Gamma ? float(Gamma[c]) : 1.0f;\n", f);
-    fputs("    float b = Beta ? float(Beta[c]) : 0.0f;\n", f);
-    fputs("    Y[row * p.ld + c] = half(v * g + b);\n", f);
+    fputs("  for (uint c0 = 0; c0 < p.cols; c0 += BWPP_RMSNORM_TILE) {\n", f);
+    fputs("    uint cmax = min(c0 + BWPP_RMSNORM_TILE, p.cols);\n", f);
+    fputs("    for (uint c = c0; c < cmax; ++c) {\n", f);
+    fputs("      float v = float(X[row * p.ld + c]) * inv;\n", f);
+    fputs("      float g = Gamma ? float(Gamma[c]) : 1.0f;\n", f);
+    fputs("      float b = Beta ? float(Beta[c]) : 0.0f;\n", f);
+    fputs("      Y[row * p.ld + c] = half(v * g + b);\n", f);
+    fputs("    }\n", f);
     fputs("  }\n", f);
     fputs("}\n", f);
   }

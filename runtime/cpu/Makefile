@@ -26,8 +26,10 @@ cpu-metal-tests: bwpp_cpu_metal_test
 	@mkdir -p $(BWPP_METAL_OUT)
 	$(BWPP_COMPILER) $(BWPP_EXAMPLES)/matmul_add_silu.bwpp $(BWPP_METAL_OUT)/matmul_add_silu.metal
 	$(BWPP_COMPILER) $(BWPP_EXAMPLES)/norms.bwpp $(BWPP_METAL_OUT)/norms.metal
+	$(BWPP_COMPILER) $(BWPP_EXAMPLES)/tiny_model.bwpp $(BWPP_METAL_OUT)/tiny_model.metal --entry tiny_model
 	./bwpp_cpu_metal_test $(BWPP_METAL_OUT)/matmul_add_silu.metal
 	./bwpp_cpu_metal_test $(BWPP_METAL_OUT)/norms.metal
+	./bwpp_cpu_metal_test $(BWPP_METAL_OUT)/tiny_model.metal
 
 clean:
 	rm -f bwpp_cpu_test bwpp_cpu_norm_test bwpp_cpu_metal_test bwpp_cpu_reduce_max_test
