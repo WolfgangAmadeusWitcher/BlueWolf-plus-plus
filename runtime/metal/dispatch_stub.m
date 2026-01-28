@@ -160,6 +160,7 @@ void bwpp_metal_dispatch_rmsnorm(id<MTLDevice> device,
                                  id<MTLCommandQueue> queue,
                                  id<MTLBuffer> x,
                                  id<MTLBuffer> gamma,
+                                 id<MTLBuffer> beta,
                                  id<MTLBuffer> y,
                                  BwppRmsnormParams params,
                                  NSString *mslSource) {
@@ -198,6 +199,15 @@ void bwpp_metal_dispatch_rmsnorm(id<MTLDevice> device,
     }
   }
 
+  id<MTLBuffer> betaBuf = beta;
+  if (!betaBuf) {
+    NSUInteger len = (NSUInteger)params.cols * sizeof(uint16_t);
+    betaBuf = [device newBufferWithLength:len options:MTLResourceStorageModeShared];
+    if (betaBuf) {
+      memset([betaBuf contents], 0, len);
+    }
+  }
+
   id<MTLCommandBuffer> cmd = [queue commandBuffer];
   id<MTLComputeCommandEncoder> enc = [cmd computeCommandEncoder];
   [enc setComputePipelineState:pso];
@@ -205,6 +215,9 @@ void bwpp_metal_dispatch_rmsnorm(id<MTLDevice> device,
   [enc setBuffer:gammaBuf offset:0 atIndex:1];
   [enc setBuffer:y offset:0 atIndex:2];
   [enc setBuffer:paramsBuf offset:0 atIndex:3];
+  if (betaBuf) {
+    [enc setBuffer:betaBuf offset:0 atIndex:4];
+  }
 
   MTLSize grid = MTLSizeMake(params.rows, 1, 1);
   NSUInteger w = pso.threadExecutionWidth;

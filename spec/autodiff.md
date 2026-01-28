@@ -28,7 +28,7 @@ Gradients are produced as a new graph that shares the same static shapes.
 - `reduce_sum`: expand gradient to input shape.
 - `reduce_max`: requires argmax mask; in reversible regions recompute inputs.
 - `softmax`: uses Jacobian-vector product; in reversible regions recompute.
-- `rmsnorm`: requires input stats; recompute if reversible.
+- `rmsnorm`: dX via rmsnorm_grad op; dGamma/dBeta use reduce_sum on normalized output.
 - `silu`: uses sigmoid(x); recompute if reversible.
 
 ## Internal grad ops (skeleton)

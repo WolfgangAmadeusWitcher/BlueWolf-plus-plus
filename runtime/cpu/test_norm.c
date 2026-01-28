@@ -40,7 +40,7 @@ int main(void) {
     }
   }
 
-  bwpp_cpu_rmsnorm_f32(x, z, gamma, rows, cols, cols, 1e-5f);
+  bwpp_cpu_rmsnorm_f32(x, z, gamma, NULL, rows, cols, cols, 1e-5f);
   for (uint32_t r = 0; r < rows; ++r) {
     float sumsq = 0.0f;
     for (uint32_t c = 0; c < cols; ++c) {

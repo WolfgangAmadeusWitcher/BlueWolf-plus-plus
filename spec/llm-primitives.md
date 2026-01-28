@@ -11,7 +11,7 @@ while keeping the compiler and runtime narrow and highly optimized.
 - `add`, `sub`, `mul`, `div` (broadcasting)
 - `reduce_sum`, `reduce_max` (axis)
 - `softmax` (axis)
-- `rmsnorm` (axis, epsilon)
+- `rmsnorm` (axis, epsilon; optional beta)
 - `silu` (activation)
 
 ## Fused patterns (first-class in codegen)

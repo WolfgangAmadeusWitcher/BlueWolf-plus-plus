@@ -63,6 +63,7 @@ void bwpp_cpu_softmax_f32(const float *x,
 void bwpp_cpu_rmsnorm_f32(const float *x,
                           float *y,
                           const float *gamma,
+                          const float *beta,
                           uint32_t rows,
                           uint32_t cols,
                           uint32_t ld,
@@ -79,6 +80,9 @@ void bwpp_cpu_rmsnorm_f32(const float *x,
       float v = x[r * ld + c] * inv;
       if (gamma) {
         v *= gamma[c];
+      }
+      if (beta) {
+        v += beta[c];
       }
       y[r * ld + c] = v;
     }

@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
     }
 
     BwppRmsnormParams nparams = { rows, cols, ld, 1e-5f };
-    bwpp_metal_dispatch_rmsnorm(device, queue, x, gamma, z, nparams, mslSource);
+    bwpp_metal_dispatch_rmsnorm(device, queue, x, gamma, nil, z, nparams, mslSource);
 
     for (uint32_t r = 0; r < rows; ++r) {
       float sumsq = 0.0f;

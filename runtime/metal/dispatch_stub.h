@@ -48,6 +48,7 @@ void bwpp_metal_dispatch_rmsnorm(id<MTLDevice> device,
                                  id<MTLCommandQueue> queue,
                                  id<MTLBuffer> x,
                                  id<MTLBuffer> gamma,
+                                 id<MTLBuffer> beta,
                                  id<MTLBuffer> y,
                                  BwppRmsnormParams params,
                                  NSString *mslSource);

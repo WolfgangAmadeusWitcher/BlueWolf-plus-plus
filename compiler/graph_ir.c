@@ -457,19 +457,44 @@ static uint32_t bwpp_parse_primary(BwppGraphParser *p, BwppGraphBuilder *b) {
         args[argc++] = gamma;
         BwppToken next_tok = bwpp_graph_next(p);
         if (next_tok.kind == BWPP_TOK_SYMBOL && next_tok.length == 1 && next_tok.lexeme[0] == ',') {
-          BwppToken eps_tok = bwpp_graph_next(p);
-          float eps = 1e-5f;
-          if (eps_tok.kind == BWPP_TOK_NUMBER) {
+          BwppToken peek = bwpp_graph_next(p);
+          if (peek.kind == BWPP_TOK_NUMBER) {
+            float eps = 1e-5f;
             float parsed = 0.0f;
-            if (bwpp_str_to_f32(bwpp_tok_str(&eps_tok), &parsed)) {
+            if (bwpp_str_to_f32(bwpp_tok_str(&peek), &parsed)) {
               eps = parsed;
             }
-          }
-          BwppToken close = bwpp_graph_next(p);
-          attr.has_epsilon = 1;
-          attr.epsilon = eps;
-          if (!(close.kind == BWPP_TOK_SYMBOL && close.length == 1 && close.lexeme[0] == ')')) {
-            return BWPP_GRAPH_NO_VALUE;
+            BwppToken close = bwpp_graph_next(p);
+            attr.has_epsilon = 1;
+            attr.epsilon = eps;
+            if (!(close.kind == BWPP_TOK_SYMBOL && close.length == 1 && close.lexeme[0] == ')')) {
+              return BWPP_GRAPH_NO_VALUE;
+            }
+          } else {
+            bwpp_graph_unread(p, peek);
+            uint32_t beta = bwpp_parse_expr(p, b);
+            args[argc++] = beta;
+            BwppToken next2 = bwpp_graph_next(p);
+            if (next2.kind == BWPP_TOK_SYMBOL && next2.length == 1 && next2.lexeme[0] == ',') {
+              BwppToken eps_tok = bwpp_graph_next(p);
+              float eps = 1e-5f;
+              float parsed = 0.0f;
+              if (eps_tok.kind == BWPP_TOK_NUMBER &&
+                  bwpp_str_to_f32(bwpp_tok_str(&eps_tok), &parsed)) {
+                eps = parsed;
+              }
+              BwppToken close = bwpp_graph_next(p);
+              attr.has_epsilon = 1;
+              attr.epsilon = eps;
+              if (!(close.kind == BWPP_TOK_SYMBOL && close.length == 1 && close.lexeme[0] == ')')) {
+                return BWPP_GRAPH_NO_VALUE;
+              }
+            } else if (next2.kind == BWPP_TOK_SYMBOL && next2.length == 1 && next2.lexeme[0] == ')') {
+              attr.has_epsilon = 1;
+              attr.epsilon = 1e-5f;
+            } else {
+              return BWPP_GRAPH_NO_VALUE;
+            }
           }
         } else if (next_tok.kind == BWPP_TOK_SYMBOL && next_tok.length == 1 && next_tok.lexeme[0] == ')') {
           attr.has_epsilon = 1;
@@ -858,6 +883,7 @@ static const char *bwpp_op_name(BwppGraphOpKind op) {
     case BWPP_GOP_TRANSPOSE: return "transpose";
     case BWPP_GOP_PERMUTE: return "permute";
     case BWPP_GOP_RESHAPE: return "reshape";
+    case BWPP_GOP_BROADCAST: return "broadcast";
     case BWPP_GOP_ADD: return "add";
     case BWPP_GOP_SUB: return "sub";
     case BWPP_GOP_MUL: return "mul";
@@ -1057,6 +1083,21 @@ static uint32_t bwpp_graph_reduce_to_shape(BwppGraph *g,
                                  0);
   }
   return val;
+}
+
+static uint32_t bwpp_graph_broadcast_to_shape(BwppGraph *g,
+                                              uint32_t val,
+                                              const BwppShape *target_shape) {
+  if (bwpp_shape_equal(&g->values[val].shape, target_shape)) {
+    return val;
+  }
+  BwppGraphAttr attr = {0};
+  attr.shape = *target_shape;
+  uint32_t inputs[1] = { val };
+  return bwpp_graph_add_op_node(g, BWPP_GOP_BROADCAST, inputs, 1, &attr, target_shape,
+                                g->values[val].dtype,
+                                g->values[val].layout,
+                                0);
 }
 
 static uint32_t bwpp_graph_accum_grad(BwppGraph *g, uint32_t existing, uint32_t add_val) {
@@ -1333,14 +1374,38 @@ BwppGraph *bwpp_graph_autodiff(const BwppGraph *graph) {
                                            grad->values[actX].layout,
                                            0);
       grad_map[n->inputs[0]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[0]], dX);
+
+      /* dGamma = reduce_sum(dY * (Y / gamma)) over non-gamma axes */
+      uint32_t actY = bwpp_graph_import_activation(grad, graph, act_map, n->output);
+      uint32_t xhat_inputs[2] = { actY, actGamma };
+      BwppGraphAttr math_attr = {0};
+      uint32_t xhat = bwpp_graph_add_op_node(grad, BWPP_GOP_DIV, xhat_inputs, 2, &math_attr,
+                                             &grad->values[actY].shape,
+                                             grad->values[actY].dtype,
+                                             grad->values[actY].layout,
+                                             0);
+      uint32_t mul_inputs[2] = { dY, xhat };
+      uint32_t dgamma_raw = bwpp_graph_add_op_node(grad, BWPP_GOP_MUL, mul_inputs, 2, &math_attr,
+                                                   &grad->values[dY].shape,
+                                                   grad->values[dY].dtype,
+                                                   grad->values[dY].layout,
+                                                   0);
+      BwppShape gamma_shape = graph->values[n->inputs[1]].shape;
+      uint32_t dGamma = bwpp_graph_reduce_to_shape(grad, dgamma_raw, &gamma_shape);
+      grad_map[n->inputs[1]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[1]], dGamma);
+
+      if (n->input_count >= 3) {
+        BwppShape beta_shape = graph->values[n->inputs[2]].shape;
+        uint32_t dBeta = bwpp_graph_reduce_to_shape(grad, dY, &beta_shape);
+        grad_map[n->inputs[2]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[2]], dBeta);
+      }
       continue;
     }
 
     if (n->op == BWPP_GOP_REDUCE_SUM && n->input_count >= 1) {
-      if (!bwpp_shape_equal(&graph->values[n->inputs[0]].shape, &grad->values[dY].shape)) {
-        fprintf(stderr, "autodiff: reduce_sum broadcast expand not implemented\n");
-      }
-      grad_map[n->inputs[0]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[0]], dY);
+      BwppShape in_shape = graph->values[n->inputs[0]].shape;
+      uint32_t dX = bwpp_graph_broadcast_to_shape(grad, dY, &in_shape);
+      grad_map[n->inputs[0]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[0]], dX);
       continue;
     }
 

@@ -53,10 +53,12 @@ typedef struct {
   BwppIrRegion *regions;
   uint32_t region_count;
   uint32_t region_capacity;
+  uint32_t flags;
 } BwppIrModule;
 
 enum { BWPP_IR_NO_REGION = 0xffffffffu };
 enum { BWPP_IR_OPF_HAS_BIAS = 1u << 0 };
+enum { BWPP_IRF_HAS_ATTENTION = 1u << 0 };
 
 BwppIrModule *bwpp_ir_create(void);
 BwppIrModule *bwpp_ir_from_ast(const BwppAstModule *module);

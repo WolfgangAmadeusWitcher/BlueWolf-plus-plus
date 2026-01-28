@@ -110,6 +110,33 @@ static BwppTileKernel *bwpp_lower_tile_matmul(const BwppIrModule *ir) {
   return kernel;
 }
 
+static BwppTileKernel *bwpp_lower_tile_attention_stub(void) {
+  BwppTileKernel *kernel = bwpp_tile_kernel_create();
+  if (!kernel) {
+    return NULL;
+  }
+  kernel->block.m = 128;
+  kernel->block.n = 128;
+  kernel->block.k = 32;
+  BwppTileOp op;
+  op.kind = BWPP_TILE_OP_ATTENTION;
+  op.tile.m = 16;
+  op.tile.n = 16;
+  op.tile.k = 16;
+  op.a_mem = BWPP_TILE_MEM_THREADGROUP;
+  op.b_mem = BWPP_TILE_MEM_THREADGROUP;
+  op.c_mem = BWPP_TILE_MEM_REGISTER;
+  op.src_mem = BWPP_TILE_MEM_THREADGROUP;
+  op.dst_mem = BWPP_TILE_MEM_REGISTER;
+  op.role = BWPP_TILE_ROLE_C;
+  op.epilogue = BWPP_TILE_EPILOGUE_NONE;
+  if (bwpp_tile_kernel_add_op(kernel, &op) != BWPP_OK) {
+    bwpp_tile_kernel_destroy(kernel);
+    return NULL;
+  }
+  return kernel;
+}
+
 BwppStatus bwpp_codegen_metal(const BwppIrModule *ir, const char *out_path) {
   FILE *f = fopen(out_path, "w");
   if (!f) {
@@ -128,7 +155,8 @@ BwppStatus bwpp_codegen_metal(const BwppIrModule *ir, const char *out_path) {
       }
     }
   }
-  BwppTileKernel *tile = bwpp_lower_tile_matmul(ir);
+  int has_attention = ir && (ir->flags & BWPP_IRF_HAS_ATTENTION);
+  BwppTileKernel *tile = has_attention ? bwpp_lower_tile_attention_stub() : bwpp_lower_tile_matmul(ir);
   const BwppTileOp *matmul = NULL;
   const BwppTileOp *epi = NULL;
   uint32_t tile_m = 16;
@@ -187,7 +215,13 @@ BwppStatus bwpp_codegen_metal(const BwppIrModule *ir, const char *out_path) {
     fprintf(f, "// bwpp.meta: region=%u kind=%s policy=%s\n", r->id, kind, pol);
   }
   if (tile) {
-    fputs("// bwpp.meta: kernel=matmul_f16\n", f);
+    if (has_attention) {
+      fputs("// bwpp.meta: kernel=attention_f16\n", f);
+      fputs("// bwpp.meta: attention_plan=tile_ir_stub\n", f);
+      fputs("// bwpp.meta: fused_attention_candidate=1\n", f);
+    } else {
+      fputs("// bwpp.meta: kernel=matmul_f16\n", f);
+    }
     fputs("// bwpp.meta: layout=row_major\n", f);
     fprintf(f, "// bwpp.meta: block=%u,%u,%u\n", tile->block.m, tile->block.n, tile->block.k);
     if (matmul) {
@@ -214,80 +248,98 @@ BwppStatus bwpp_codegen_metal(const BwppIrModule *ir, const char *out_path) {
   if (has_rmsnorm) {
     fputs("// bwpp.meta: aux_kernel=rmsnorm_f16\n", f);
   }
-  if (tile && matmul) {
+  if (tile) {
     fputs("#include <metal_stdlib>\n", f);
     fputs("using namespace metal;\n\n", f);
-    fprintf(f, "#define TILE_M %u\n", tile_m);
-    fprintf(f, "#define TILE_N %u\n", tile_n);
-    fprintf(f, "#define TILE_K %u\n\n", tile_k);
-    int ep_add = 0;
-    int ep_silu = 0;
-    if (epi) {
-      if (epi->epilogue == BWPP_TILE_EPILOGUE_ADD) {
-        ep_add = 1;
-      } else if (epi->epilogue == BWPP_TILE_EPILOGUE_SILU) {
-        ep_silu = 1;
-      } else if (epi->epilogue == BWPP_TILE_EPILOGUE_ADD_SILU) {
-        ep_add = 1;
-        ep_silu = 1;
+    if (!has_attention) {
+      fprintf(f, "#define TILE_M %u\n", tile_m);
+      fprintf(f, "#define TILE_N %u\n", tile_n);
+      fprintf(f, "#define TILE_K %u\n\n", tile_k);
+      int ep_add = 0;
+      int ep_silu = 0;
+      if (epi) {
+        if (epi->epilogue == BWPP_TILE_EPILOGUE_ADD) {
+          ep_add = 1;
+        } else if (epi->epilogue == BWPP_TILE_EPILOGUE_SILU) {
+          ep_silu = 1;
+        } else if (epi->epilogue == BWPP_TILE_EPILOGUE_ADD_SILU) {
+          ep_add = 1;
+          ep_silu = 1;
+        }
       }
+      fprintf(f, "#define BWPP_EPILOGUE_ADD %d\n", ep_add);
+      fprintf(f, "#define BWPP_EPILOGUE_SILU %d\n\n", ep_silu);
+      fputs("struct BwppMatmulParams {\n", f);
+      fputs("  uint M;\n", f);
+      fputs("  uint N;\n", f);
+      fputs("  uint K;\n", f);
+      fputs("  uint lda;\n", f);
+      fputs("  uint ldb;\n", f);
+      fputs("  uint ldc;\n", f);
+      fputs("};\n\n", f);
+      fputs("inline float bwpp_silu(float x) {\n", f);
+      fputs("  return x / (1.0f + exp(-x));\n", f);
+      fputs("}\n\n", f);
+      fputs("kernel void bwpp_matmul_f16(\n", f);
+      fputs("    device const half *A [[buffer(0)]],\n", f);
+      fputs("    device const half *B [[buffer(1)]],\n", f);
+      fputs("    device half *C [[buffer(2)]],\n", f);
+      fputs("    constant BwppMatmulParams &p [[buffer(3)]],\n", f);
+      fputs("    device const half *Bias [[buffer(4)]],\n", f);
+      fputs("    uint2 tid [[thread_position_in_threadgroup]],\n", f);
+      fputs("    uint2 tgid [[threadgroup_position_in_grid]]) {\n", f);
+      fputs("  threadgroup half As[TILE_M][TILE_K];\n", f);
+      fputs("  threadgroup half Bs[TILE_K][TILE_N];\n", f);
+      fputs("  uint row = tgid.y * TILE_M + tid.y;\n", f);
+      fputs("  uint col = tgid.x * TILE_N + tid.x;\n", f);
+      fputs("  float acc = 0.0f;\n", f);
+      fputs("  for (uint k0 = 0; k0 < p.K; k0 += TILE_K) {\n", f);
+      fputs("    uint a_col = k0 + tid.x;\n", f);
+      fputs("    if (row < p.M && a_col < p.K) {\n", f);
+      fputs("      As[tid.y][tid.x] = A[row * p.lda + a_col];\n", f);
+      fputs("    } else {\n", f);
+      fputs("      As[tid.y][tid.x] = half(0.0f);\n", f);
+      fputs("    }\n", f);
+      fputs("    uint b_row = k0 + tid.y;\n", f);
+      fputs("    if (b_row < p.K && col < p.N) {\n", f);
+      fputs("      Bs[tid.y][tid.x] = B[b_row * p.ldb + col];\n", f);
+      fputs("    } else {\n", f);
+      fputs("      Bs[tid.y][tid.x] = half(0.0f);\n", f);
+      fputs("    }\n", f);
+      fputs("    threadgroup_barrier(mem_flags::mem_threadgroup);\n", f);
+      fputs("    for (uint k = 0; k < TILE_K; ++k) {\n", f);
+      fputs("      acc += float(As[tid.y][k]) * float(Bs[k][tid.x]);\n", f);
+      fputs("    }\n", f);
+      fputs("    threadgroup_barrier(mem_flags::mem_threadgroup);\n", f);
+      fputs("  }\n", f);
+      fputs("  if (row < p.M && col < p.N) {\n", f);
+      fputs("    float out = acc;\n", f);
+      fputs("#if BWPP_EPILOGUE_ADD\n", f);
+      fputs("    out += float(Bias[col]);\n", f);
+      fputs("#endif\n", f);
+      fputs("#if BWPP_EPILOGUE_SILU\n", f);
+      fputs("    out = bwpp_silu(out);\n", f);
+      fputs("#endif\n", f);
+      fputs("    C[row * p.ldc + col] = half(out);\n", f);
+      fputs("  }\n", f);
+      fputs("}\n", f);
+    } else {
+      fputs("struct BwppAttentionParams {\n", f);
+      fputs("  uint M;\n", f);
+      fputs("  uint N;\n", f);
+      fputs("  uint K;\n", f);
+      fputs("};\n\n", f);
+      fputs("kernel void bwpp_attention_f16(\n", f);
+      fputs("    device const half *Q [[buffer(0)]],\n", f);
+      fputs("    device const half *K [[buffer(1)]],\n", f);
+      fputs("    device const half *V [[buffer(2)]],\n", f);
+      fputs("    device half *O [[buffer(3)]],\n", f);
+      fputs("    constant BwppAttentionParams &p [[buffer(4)]],\n", f);
+      fputs("    uint gid [[thread_position_in_grid]]) {\n", f);
+      fputs("  if (gid >= p.M * p.N) { return; }\n", f);
+      fputs("  O[gid] = half(0.0f);\n", f);
+      fputs("}\n", f);
     }
-    fprintf(f, "#define BWPP_EPILOGUE_ADD %d\n", ep_add);
-    fprintf(f, "#define BWPP_EPILOGUE_SILU %d\n\n", ep_silu);
-    fputs("struct BwppMatmulParams {\n", f);
-    fputs("  uint M;\n", f);
-    fputs("  uint N;\n", f);
-    fputs("  uint K;\n", f);
-    fputs("  uint lda;\n", f);
-    fputs("  uint ldb;\n", f);
-    fputs("  uint ldc;\n", f);
-    fputs("};\n\n", f);
-    fputs("inline float bwpp_silu(float x) {\n", f);
-    fputs("  return x / (1.0f + exp(-x));\n", f);
-    fputs("}\n\n", f);
-    fputs("kernel void bwpp_matmul_f16(\n", f);
-    fputs("    device const half *A [[buffer(0)]],\n", f);
-    fputs("    device const half *B [[buffer(1)]],\n", f);
-    fputs("    device half *C [[buffer(2)]],\n", f);
-    fputs("    constant BwppMatmulParams &p [[buffer(3)]],\n", f);
-    fputs("    device const half *Bias [[buffer(4)]],\n", f);
-    fputs("    uint2 tid [[thread_position_in_threadgroup]],\n", f);
-    fputs("    uint2 tgid [[threadgroup_position_in_grid]]) {\n", f);
-    fputs("  threadgroup half As[TILE_M][TILE_K];\n", f);
-    fputs("  threadgroup half Bs[TILE_K][TILE_N];\n", f);
-    fputs("  uint row = tgid.y * TILE_M + tid.y;\n", f);
-    fputs("  uint col = tgid.x * TILE_N + tid.x;\n", f);
-    fputs("  float acc = 0.0f;\n", f);
-    fputs("  for (uint k0 = 0; k0 < p.K; k0 += TILE_K) {\n", f);
-    fputs("    uint a_col = k0 + tid.x;\n", f);
-    fputs("    if (row < p.M && a_col < p.K) {\n", f);
-    fputs("      As[tid.y][tid.x] = A[row * p.lda + a_col];\n", f);
-    fputs("    } else {\n", f);
-    fputs("      As[tid.y][tid.x] = half(0.0f);\n", f);
-    fputs("    }\n", f);
-    fputs("    uint b_row = k0 + tid.y;\n", f);
-    fputs("    if (b_row < p.K && col < p.N) {\n", f);
-    fputs("      Bs[tid.y][tid.x] = B[b_row * p.ldb + col];\n", f);
-    fputs("    } else {\n", f);
-    fputs("      Bs[tid.y][tid.x] = half(0.0f);\n", f);
-    fputs("    }\n", f);
-    fputs("    threadgroup_barrier(mem_flags::mem_threadgroup);\n", f);
-    fputs("    for (uint k = 0; k < TILE_K; ++k) {\n", f);
-    fputs("      acc += float(As[tid.y][k]) * float(Bs[k][tid.x]);\n", f);
-    fputs("    }\n", f);
-    fputs("    threadgroup_barrier(mem_flags::mem_threadgroup);\n", f);
-    fputs("  }\n", f);
-    fputs("  if (row < p.M && col < p.N) {\n", f);
-    fputs("    float out = acc;\n", f);
-    fputs("#if BWPP_EPILOGUE_ADD\n", f);
-    fputs("    out += float(Bias[col]);\n", f);
-    fputs("#endif\n", f);
-    fputs("#if BWPP_EPILOGUE_SILU\n", f);
-    fputs("    out = bwpp_silu(out);\n", f);
-    fputs("#endif\n", f);
-    fputs("    C[row * p.ldc + col] = half(out);\n", f);
-    fputs("  }\n", f);
-    fputs("}\n", f);
   }
   if (has_softmax) {
     fputs("\nstruct BwppSoftmaxParams {\n", f);
@@ -331,6 +383,7 @@ BwppStatus bwpp_codegen_metal(const BwppIrModule *ir, const char *out_path) {
     fputs("    device const half *Gamma [[buffer(1)]],\n", f);
     fputs("    device half *Y [[buffer(2)]],\n", f);
     fputs("    constant BwppRmsnormParams &p [[buffer(3)]],\n", f);
+    fputs("    device const half *Beta [[buffer(4)]],\n", f);
     fputs("    uint gid [[thread_position_in_grid]]) {\n", f);
     fputs("  uint row = gid;\n", f);
     fputs("  if (row >= p.rows) { return; }\n", f);
@@ -343,7 +396,8 @@ BwppStatus bwpp_codegen_metal(const BwppIrModule *ir, const char *out_path) {
     fputs("  for (uint c = 0; c < p.cols; ++c) {\n", f);
     fputs("    float v = float(X[row * p.ld + c]) * inv;\n", f);
     fputs("    float g = Gamma ? float(Gamma[c]) : 1.0f;\n", f);
-    fputs("    Y[row * p.ld + c] = half(v * g);\n", f);
+    fputs("    float b = Beta ? float(Beta[c]) : 0.0f;\n", f);
+    fputs("    Y[row * p.ld + c] = half(v * g + b);\n", f);
     fputs("  }\n", f);
     fputs("}\n", f);
   }

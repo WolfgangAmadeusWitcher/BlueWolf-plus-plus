@@ -25,6 +25,8 @@
 - Reversible policy is recorded (`store`, `recompute`, `auto`).
 - `fused_attention_candidate=1` is appended when the graph matches the
   QK^T → softmax → V pattern (experimental, v0.1 stub).
+- `attention_plan=tile_ir_stub` marks a Tile-IR-level fused attention plan
+  placeholder (no real kernel yet).
 
 ## Device profiles
 - GPU-first targeting Apple Silicon (M4-class default).

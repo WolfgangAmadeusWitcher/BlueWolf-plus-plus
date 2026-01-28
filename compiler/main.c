@@ -142,6 +142,17 @@ int main(int argc, char **argv) {
     }
   }
 
+  int has_attention = 0;
+  if (graph) {
+    has_attention = bwpp_graph_detect_attention(graph);
+    if (has_attention) {
+      ir->flags |= BWPP_IRF_HAS_ATTENTION;
+    }
+    if (attn_report) {
+      fprintf(stderr, "attention_candidate=%d\n", has_attention);
+    }
+  }
+
   if (mem_plan_path && graph) {
     BwppMemPlan *plan = bwpp_mem_plan_build(graph);
     if (!plan) {
@@ -165,20 +176,6 @@ int main(int argc, char **argv) {
     bwpp_ast_module_destroy(module);
     free(src);
     return 1;
-  }
-
-  if (graph) {
-    int has_attention = bwpp_graph_detect_attention(graph);
-    if (attn_report) {
-      fprintf(stderr, "attention_candidate=%d\n", has_attention);
-    }
-    if (has_attention) {
-      FILE *out = fopen(output_path, "a");
-      if (out) {
-        fputs("\n// bwpp.meta: fused_attention_candidate=1\n", out);
-        fclose(out);
-      }
-    }
   }
 
   bwpp_graph_destroy(graph);

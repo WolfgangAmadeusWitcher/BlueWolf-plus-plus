@@ -15,6 +15,7 @@ It captures tile sizes, memory placement, and op sequencing.
 - `load` (global -> threadgroup)
 - `store` (register -> global)
 - `elementwise` (for fused epilogues such as add/silu)
+- `attention` (experimental fused attention stub)
 
 ## Example (conceptual)
 - block: (128, 128, 32)

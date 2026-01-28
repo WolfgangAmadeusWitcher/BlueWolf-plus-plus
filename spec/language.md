@@ -29,7 +29,7 @@
 - `add`, `sub`, `mul`, `div` (broadcasting)
 - `reduce_sum`, `reduce_max` (axis)
 - `softmax` (axis)
-- `rmsnorm` (axis, epsilon)
+- `rmsnorm` (axis, epsilon; optional beta)
 - `silu`
 
 Notes:

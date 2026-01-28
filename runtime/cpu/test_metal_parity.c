@@ -214,7 +214,7 @@ static int test_rmsnorm(const char *src) {
       ref[r * ld + c] = x[r * ld + c] * inv * gamma[c];
     }
   }
-  bwpp_cpu_rmsnorm_f32(x, y, gamma, rows, cols, ld, eps);
+  bwpp_cpu_rmsnorm_f32(x, y, gamma, NULL, rows, cols, ld, eps);
   float max_err = 0.0f;
   for (uint32_t i = 0; i < rows * cols; ++i) {
     float diff = fabsf(y[i] - ref[i]);
