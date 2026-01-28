@@ -27,6 +27,7 @@
   QK^T → softmax → V pattern (experimental, v0.1 stub).
 - `attention_plan=tile_ir_stub` marks a Tile-IR-level fused attention plan
   placeholder (no real kernel yet).
+- `bwpp.plan` lines enumerate the tile-op sequence for fused attention.
 
 ## Device profiles
 - GPU-first targeting Apple Silicon (M4-class default).

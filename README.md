@@ -42,10 +42,16 @@ See `ROADMAP.md`.
 ## Tests
 - Build compiler: `make -C compiler`
 - CPU ref tests: `make -C runtime/cpu` then `./runtime/cpu/bwpp_cpu_test` and `./runtime/cpu/bwpp_cpu_norm_test`
+- Reduce-max grad test: `./runtime/cpu/bwpp_cpu_reduce_max_test`
 - CPU Metal-parity tests (generate `.metal` from examples and validate via CPU ref):
   `make -C runtime/cpu cpu-metal-tests`
 - Memory planner report:
   `./compiler/bwppc examples/norms.bwpp out_norm.metal --mem-plan mem_plan.txt`
+
+## Benchmarks
+- Build CPU benchmark: `make -C bench`
+- Run: `./bench/bwpp_bench --iters 10 --m 256 --n 256 --k 256`
+- Include Metal metadata: `./bench/bwpp_bench --metal out_tiny.metal`
 
 ## Graphviz
 Generate a forward graph + autodiff graph as DOT files:

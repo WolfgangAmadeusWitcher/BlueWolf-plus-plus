@@ -15,6 +15,7 @@ It captures tile sizes, memory placement, and op sequencing.
 - `load` (global -> threadgroup)
 - `store` (register -> global)
 - `elementwise` (for fused epilogues such as add/silu)
+- `softmax` (reduction + normalize, experimental)
 - `attention` (experimental fused attention stub)
 
 ## Example (conceptual)

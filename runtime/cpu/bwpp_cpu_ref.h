@@ -31,4 +31,17 @@ void bwpp_cpu_rmsnorm_f32(const float *x,
                           uint32_t ld,
                           float eps);
 
+void bwpp_cpu_reduce_max_mask_f32(const float *x,
+                                  float *mask,
+                                  uint32_t rows,
+                                  uint32_t cols,
+                                  int axis);
+
+void bwpp_cpu_reduce_max_grad_f32(const float *mask,
+                                  const float *dy,
+                                  float *dx,
+                                  uint32_t rows,
+                                  uint32_t cols,
+                                  int axis);
+
 #endif

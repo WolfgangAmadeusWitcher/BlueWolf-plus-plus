@@ -195,6 +195,10 @@ static BwppStr bwpp_shape_one_dim(void) {
   return one;
 }
 
+static int bwpp_shape_rank(const BwppShape *shape) {
+  return (int)shape->rank;
+}
+
 static uint32_t bwpp_graph_add_value(BwppGraph *g, BwppGraphValue v) {
   if (g->value_count == g->value_capacity) {
     uint32_t new_cap = g->value_capacity == 0 ? 16 : g->value_capacity * 2;
@@ -1432,6 +1436,10 @@ BwppGraph *bwpp_graph_autodiff(const BwppGraph *graph) {
       uint32_t actX = bwpp_graph_import_activation(grad, graph, act_map, n->inputs[0]);
       BwppShape in_shape = graph->values[n->inputs[0]].shape;
       BwppGraphAttr attr = n->attr;
+      if (!attr.has_axis) {
+        attr.has_axis = 1;
+        attr.axis = bwpp_shape_rank(&in_shape) - 1;
+      }
       uint32_t mask_inputs[1] = { actX };
       uint32_t mask = bwpp_graph_add_op_node(grad, BWPP_GOP_REDUCE_MAX_MASK, mask_inputs, 1, &attr,
                                              &grad->values[actX].shape,

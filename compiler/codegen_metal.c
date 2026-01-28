@@ -2,6 +2,18 @@
 #include "tile_ir.h"
 #include <stdio.h>
 
+static const char *bwpp_tile_op_name(BwppTileOpKind kind) {
+  switch (kind) {
+    case BWPP_TILE_OP_MATMUL: return "matmul";
+    case BWPP_TILE_OP_LOAD: return "load";
+    case BWPP_TILE_OP_STORE: return "store";
+    case BWPP_TILE_OP_ELEMENTWISE: return "elementwise";
+    case BWPP_TILE_OP_SOFTMAX: return "softmax";
+    case BWPP_TILE_OP_ATTENTION: return "attention";
+  }
+  return "unknown";
+}
+
 static BwppTileKernel *bwpp_lower_tile_matmul(const BwppIrModule *ir) {
   if (!ir) {
     return NULL;
@@ -119,17 +131,79 @@ static BwppTileKernel *bwpp_lower_tile_attention_stub(void) {
   kernel->block.n = 128;
   kernel->block.k = 32;
   BwppTileOp op;
-  op.kind = BWPP_TILE_OP_ATTENTION;
   op.tile.m = 16;
   op.tile.n = 16;
   op.tile.k = 16;
+  op.epilogue = BWPP_TILE_EPILOGUE_NONE;
+
+  op.kind = BWPP_TILE_OP_LOAD;
+  op.role = BWPP_TILE_ROLE_A; /* Q */
+  op.src_mem = BWPP_TILE_MEM_GLOBAL;
+  op.dst_mem = BWPP_TILE_MEM_THREADGROUP;
+  op.a_mem = BWPP_TILE_MEM_GLOBAL;
+  op.b_mem = BWPP_TILE_MEM_GLOBAL;
+  op.c_mem = BWPP_TILE_MEM_GLOBAL;
+  if (bwpp_tile_kernel_add_op(kernel, &op) != BWPP_OK) {
+    bwpp_tile_kernel_destroy(kernel);
+    return NULL;
+  }
+
+  op.kind = BWPP_TILE_OP_LOAD;
+  op.role = BWPP_TILE_ROLE_B; /* K */
+  if (bwpp_tile_kernel_add_op(kernel, &op) != BWPP_OK) {
+    bwpp_tile_kernel_destroy(kernel);
+    return NULL;
+  }
+
+  op.kind = BWPP_TILE_OP_MATMUL; /* QK^T */
+  op.role = BWPP_TILE_ROLE_C;
   op.a_mem = BWPP_TILE_MEM_THREADGROUP;
   op.b_mem = BWPP_TILE_MEM_THREADGROUP;
   op.c_mem = BWPP_TILE_MEM_REGISTER;
   op.src_mem = BWPP_TILE_MEM_THREADGROUP;
   op.dst_mem = BWPP_TILE_MEM_REGISTER;
+  if (bwpp_tile_kernel_add_op(kernel, &op) != BWPP_OK) {
+    bwpp_tile_kernel_destroy(kernel);
+    return NULL;
+  }
+
+  op.kind = BWPP_TILE_OP_SOFTMAX; /* softmax(scores) */
   op.role = BWPP_TILE_ROLE_C;
-  op.epilogue = BWPP_TILE_EPILOGUE_NONE;
+  op.src_mem = BWPP_TILE_MEM_REGISTER;
+  op.dst_mem = BWPP_TILE_MEM_REGISTER;
+  if (bwpp_tile_kernel_add_op(kernel, &op) != BWPP_OK) {
+    bwpp_tile_kernel_destroy(kernel);
+    return NULL;
+  }
+
+  op.kind = BWPP_TILE_OP_LOAD;
+  op.role = BWPP_TILE_ROLE_B; /* V */
+  op.src_mem = BWPP_TILE_MEM_GLOBAL;
+  op.dst_mem = BWPP_TILE_MEM_THREADGROUP;
+  if (bwpp_tile_kernel_add_op(kernel, &op) != BWPP_OK) {
+    bwpp_tile_kernel_destroy(kernel);
+    return NULL;
+  }
+
+  op.kind = BWPP_TILE_OP_MATMUL; /* softmax(QK^T) * V */
+  op.role = BWPP_TILE_ROLE_C;
+  op.a_mem = BWPP_TILE_MEM_THREADGROUP;
+  op.b_mem = BWPP_TILE_MEM_THREADGROUP;
+  op.c_mem = BWPP_TILE_MEM_REGISTER;
+  op.src_mem = BWPP_TILE_MEM_THREADGROUP;
+  op.dst_mem = BWPP_TILE_MEM_REGISTER;
+  if (bwpp_tile_kernel_add_op(kernel, &op) != BWPP_OK) {
+    bwpp_tile_kernel_destroy(kernel);
+    return NULL;
+  }
+
+  op.kind = BWPP_TILE_OP_STORE;
+  op.role = BWPP_TILE_ROLE_C;
+  op.src_mem = BWPP_TILE_MEM_REGISTER;
+  op.dst_mem = BWPP_TILE_MEM_GLOBAL;
+  op.a_mem = BWPP_TILE_MEM_REGISTER;
+  op.b_mem = BWPP_TILE_MEM_REGISTER;
+  op.c_mem = BWPP_TILE_MEM_GLOBAL;
   if (bwpp_tile_kernel_add_op(kernel, &op) != BWPP_OK) {
     bwpp_tile_kernel_destroy(kernel);
     return NULL;
@@ -239,6 +313,13 @@ BwppStatus bwpp_codegen_metal(const BwppIrModule *ir, const char *out_path) {
       fprintf(f, "// bwpp.meta: epilogue=%s\n", ep);
     }
     fputs("// bwpp.meta: params=M,N,K,lda,ldb,ldc\n\n", f);
+    if (has_attention && tile) {
+      for (uint32_t i = 0; i < tile->op_count; ++i) {
+        const BwppTileOp *op = &tile->ops[i];
+        fprintf(f, "// bwpp.plan: %u=%s role=%u\n", i, bwpp_tile_op_name(op->kind), (unsigned)op->role);
+      }
+      fputs("\n", f);
+    }
   } else {
     fputs("// bwpp.meta: kernel=none\n\n", f);
   }

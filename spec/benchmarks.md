@@ -18,3 +18,7 @@
 - throughput (GFLOPS)
 - peak memory
 - end-to-end latency
+
+## Harness (v0.1)
+- `bench/bwpp_bench` runs CPU reference matmul/softmax/rmsnorm.
+- Optional: read `bwpp.meta` lines from generated `.metal` output.

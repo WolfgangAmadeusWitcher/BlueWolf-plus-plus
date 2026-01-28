@@ -88,3 +88,78 @@ void bwpp_cpu_rmsnorm_f32(const float *x,
     }
   }
 }
+
+void bwpp_cpu_reduce_max_mask_f32(const float *x,
+                                  float *mask,
+                                  uint32_t rows,
+                                  uint32_t cols,
+                                  int axis) {
+  if (!x || !mask) {
+    return;
+  }
+  for (uint32_t i = 0; i < rows * cols; ++i) {
+    mask[i] = 0.0f;
+  }
+  if (axis == 0) {
+    for (uint32_t c = 0; c < cols; ++c) {
+      float maxv = -INFINITY;
+      for (uint32_t r = 0; r < rows; ++r) {
+        float v = x[r * cols + c];
+        if (v > maxv) {
+          maxv = v;
+        }
+      }
+      for (uint32_t r = 0; r < rows; ++r) {
+        float v = x[r * cols + c];
+        if (v == maxv) {
+          mask[r * cols + c] = 1.0f;
+        }
+      }
+    }
+  } else {
+    for (uint32_t r = 0; r < rows; ++r) {
+      float maxv = -INFINITY;
+      for (uint32_t c = 0; c < cols; ++c) {
+        float v = x[r * cols + c];
+        if (v > maxv) {
+          maxv = v;
+        }
+      }
+      for (uint32_t c = 0; c < cols; ++c) {
+        float v = x[r * cols + c];
+        if (v == maxv) {
+          mask[r * cols + c] = 1.0f;
+        }
+      }
+    }
+  }
+}
+
+void bwpp_cpu_reduce_max_grad_f32(const float *mask,
+                                  const float *dy,
+                                  float *dx,
+                                  uint32_t rows,
+                                  uint32_t cols,
+                                  int axis) {
+  if (!mask || !dy || !dx) {
+    return;
+  }
+  for (uint32_t i = 0; i < rows * cols; ++i) {
+    dx[i] = 0.0f;
+  }
+  if (axis == 0) {
+    for (uint32_t c = 0; c < cols; ++c) {
+      float g = dy[c];
+      for (uint32_t r = 0; r < rows; ++r) {
+        dx[r * cols + c] = mask[r * cols + c] * g;
+      }
+    }
+  } else {
+    for (uint32_t r = 0; r < rows; ++r) {
+      float g = dy[r];
+      for (uint32_t c = 0; c < cols; ++c) {
+        dx[r * cols + c] = mask[r * cols + c] * g;
+      }
+    }
+  }
+}

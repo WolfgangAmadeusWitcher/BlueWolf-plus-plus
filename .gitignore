@@ -12,6 +12,8 @@ runtime/metal/bwpp_metal_norm_test
 runtime/cpu/bwpp_cpu_test
 runtime/cpu/bwpp_cpu_norm_test
 runtime/cpu/bwpp_cpu_metal_test
+runtime/cpu/bwpp_cpu_reduce_max_test
+bench/bwpp_bench
 
 # OS
 .DS_Store
