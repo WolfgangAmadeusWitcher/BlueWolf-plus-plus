@@ -253,6 +253,23 @@ BwppStatus bwpp_codegen_metal(const BwppIrModule *ir, const char *out_path) {
       }
     }
   }
+  uint32_t tile_req_m = tile_m;
+  uint32_t tile_req_n = tile_n;
+  uint32_t tile_req_k = tile_k;
+  int tile_clamped = 0;
+  if (tile_req_m != tile_req_n || tile_req_n != tile_req_k) {
+    uint32_t min_tile = tile_req_m;
+    if (tile_req_n < min_tile) {
+      min_tile = tile_req_n;
+    }
+    if (tile_req_k < min_tile) {
+      min_tile = tile_req_k;
+    }
+    tile_m = min_tile;
+    tile_n = min_tile;
+    tile_k = min_tile;
+    tile_clamped = 1;
+  }
   fputs("// BW++ Metal output stub\n", f);
   fprintf(f, "// bwpp.meta: ops=%u reversible_regions=%u\n", op_count, region_count);
   const char *policy = "auto";
@@ -299,6 +316,10 @@ BwppStatus bwpp_codegen_metal(const BwppIrModule *ir, const char *out_path) {
     fputs("// bwpp.meta: layout=row_major\n", f);
     fprintf(f, "// bwpp.meta: block=%u,%u,%u\n", tile->block.m, tile->block.n, tile->block.k);
     if (matmul) {
+      if (tile_clamped) {
+        fprintf(f, "// bwpp.meta: tile_requested=%u,%u,%u\n", tile_req_m, tile_req_n, tile_req_k);
+        fputs("// bwpp.meta: tile_clamped=1\n", f);
+      }
       fprintf(f, "// bwpp.meta: tile=%u,%u,%u\n", tile_m, tile_n, tile_k);
     }
     if (epi) {

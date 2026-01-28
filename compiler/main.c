@@ -44,6 +44,7 @@ int main(int argc, char **argv) {
   const char *grad_dot_path = NULL;
   const char *mem_plan_path = NULL;
   int attn_report = 0;
+  const char *entry = NULL;
 
   for (int i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--dot") == 0 && i + 1 < argc) {
@@ -56,6 +57,10 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[i], "--mem-plan") == 0 && i + 1 < argc) {
       mem_plan_path = argv[++i];
+      continue;
+    }
+    if (strcmp(argv[i], "--entry") == 0 && i + 1 < argc) {
+      entry = argv[++i];
       continue;
     }
     if (strcmp(argv[i], "--attn-report") == 0) {
@@ -75,7 +80,7 @@ int main(int argc, char **argv) {
   if (!input_path || !output_path) {
     fprintf(stderr,
             "usage: %s <input.bwpp> <output.metal> [--dot <graph.dot>] [--grad-dot <grad.dot>]\n"
-            "       [--mem-plan <plan.txt>] [--attn-report]\n",
+            "       [--mem-plan <plan.txt>] [--attn-report] [--entry <fn>]\n",
             argv[0]);
     return 1;
   }
@@ -103,15 +108,27 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  BwppIrModule *ir = bwpp_ir_from_ast(module);
-  if (!ir) {
-    fprintf(stderr, "ir failed\n");
+  BwppGraph *graph = bwpp_graph_build(module, entry);
+  if (!graph) {
+    fprintf(stderr, "graph build failed");
+    if (entry && entry[0] != '\0') {
+      fprintf(stderr, " (entry %s not found)\n", entry);
+    } else {
+      fprintf(stderr, "\n");
+    }
     bwpp_ast_module_destroy(module);
     free(src);
     return 1;
   }
 
-  BwppGraph *graph = bwpp_graph_build(module);
+  BwppIrModule *ir = bwpp_ir_from_graph(graph);
+  if (!ir) {
+    fprintf(stderr, "ir failed\n");
+    bwpp_graph_destroy(graph);
+    bwpp_ast_module_destroy(module);
+    free(src);
+    return 1;
+  }
 
   if (dot_path && graph) {
     FILE *dot = fopen(dot_path, "w");

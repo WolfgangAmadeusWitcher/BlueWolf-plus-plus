@@ -5,6 +5,7 @@ It captures tile sizes, memory placement, and op sequencing.
 
 ## Concepts
 - **Tile shape**: (m, n, k) sizes for matmul tiles.
+- **Square tiles (current)**: matmul kernel assumes m = n = k; non-square tiles are clamped to min for correctness.
 - **Memory space**: global, threadgroup, register.
 - **Block shape**: threadgroup-level tile dimensions.
 - **SPMD mapping**: tile programs map to threadgroup + SIMD lanes.

@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+typedef struct BwppGraph BwppGraph;
+
 typedef enum {
   BWPP_OP_MATMUL = 0,
   BWPP_OP_BATCH_MATMUL,
@@ -62,6 +64,7 @@ enum { BWPP_IRF_HAS_ATTENTION = 1u << 0 };
 
 BwppIrModule *bwpp_ir_create(void);
 BwppIrModule *bwpp_ir_from_ast(const BwppAstModule *module);
+BwppIrModule *bwpp_ir_from_graph(const BwppGraph *graph);
 void bwpp_ir_destroy(BwppIrModule *ir);
 uint32_t bwpp_ir_add_region(BwppIrModule *ir, BwppRegionKind kind, BwppRegionPolicy policy);
 BwppStatus bwpp_ir_add_node(BwppIrModule *ir, BwppOpKind op, uint32_t region_id, uint32_t flags);

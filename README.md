@@ -62,5 +62,8 @@ Render to PNG:
 Attention candidate report (prints to stderr, annotates `.metal` if detected):
 `./compiler/bwppc examples/attention.bwpp out_attention.metal --attn-report`
 
+Multi-function entrypoint selection:
+`./compiler/bwppc examples/tiny_model.bwpp out_tiny.metal --entry tiny_model`
+
 ## License
 Apache-2.0.

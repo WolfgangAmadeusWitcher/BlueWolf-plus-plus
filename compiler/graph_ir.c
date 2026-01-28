@@ -679,6 +679,7 @@ static uint32_t bwpp_parse_expr(BwppGraphParser *p, BwppGraphBuilder *b) {
 }
 
 static int bwpp_parse_params(BwppGraphParser *p, BwppGraphBuilder *b) {
+  int emit = b && b->graph;
   BwppToken tok = bwpp_graph_next(p);
   if (!(tok.kind == BWPP_TOK_SYMBOL && tok.length == 1 && tok.lexeme[0] == '(')) {
     return 0;
@@ -732,16 +733,18 @@ static int bwpp_parse_params(BwppGraphParser *p, BwppGraphBuilder *b) {
       return 0;
     }
 
-    BwppGraphValue v = {0};
-    v.name = bwpp_tok_str(&name);
-    v.dtype = bwpp_parse_dtype(bwpp_tok_str(&dtype_tok));
-    v.layout = layout;
-    bwpp_shape_copy(&v.shape, &shape);
-    v.producer = BWPP_GRAPH_NO_NODE;
-    v.flags = BWPP_GRAPH_VALUE_INPUT;
-    uint32_t id = bwpp_graph_add_value(b->graph, v);
-    if (id != BWPP_GRAPH_NO_VALUE) {
-      bwpp_binding_set(b, v.name, id);
+    if (emit) {
+      BwppGraphValue v = {0};
+      v.name = bwpp_tok_str(&name);
+      v.dtype = bwpp_parse_dtype(bwpp_tok_str(&dtype_tok));
+      v.layout = layout;
+      bwpp_shape_copy(&v.shape, &shape);
+      v.producer = BWPP_GRAPH_NO_NODE;
+      v.flags = BWPP_GRAPH_VALUE_INPUT;
+      uint32_t id = bwpp_graph_add_value(b->graph, v);
+      if (id != BWPP_GRAPH_NO_VALUE) {
+        bwpp_binding_set(b, v.name, id);
+      }
     }
 
     BwppToken sep = bwpp_graph_next(p);
@@ -755,7 +758,7 @@ static int bwpp_parse_params(BwppGraphParser *p, BwppGraphBuilder *b) {
   return 1;
 }
 
-BwppGraph *bwpp_graph_build(const BwppAstModule *module) {
+BwppGraph *bwpp_graph_build(const BwppAstModule *module, const char *entry) {
   if (!module || !module->source) {
     return NULL;
   }
@@ -774,6 +777,7 @@ BwppGraph *bwpp_graph_build(const BwppAstModule *module) {
   int pending_reversible = 0;
   int inside_fn = 0;
   int built_fn = 0;
+  int found_entry = 0;
   uint32_t current_region = BWPP_GRAPH_NO_REGION;
   int reversible_brace_depth = -1;
 
@@ -830,13 +834,24 @@ BwppGraph *bwpp_graph_build(const BwppAstModule *module) {
     }
 
     if (tok.kind == BWPP_TOK_IDENT && bwpp_tok_is(&tok, "fn")) {
-      if (built_fn) {
-        break;
-      }
       BwppToken name = bwpp_graph_next(&parser);
-      (void)name;
-      inside_fn = 1;
-      if (!bwpp_parse_params(&parser, &builder)) {
+      BwppStr fn_name = bwpp_tok_str(&name);
+      int is_target = 0;
+      if (entry && entry[0] != '\0') {
+        size_t len = strlen(entry);
+        if (fn_name.len == len && strncmp(fn_name.ptr, entry, len) == 0) {
+          is_target = 1;
+          found_entry = 1;
+        }
+      } else if (!built_fn) {
+        is_target = 1;
+      }
+      inside_fn = is_target;
+      if (is_target) {
+        built_fn = 1;
+      }
+      BwppGraphBuilder *active_builder = is_target ? &builder : NULL;
+      if (!bwpp_parse_params(&parser, active_builder)) {
         break;
       }
       continue;
@@ -877,6 +892,10 @@ BwppGraph *bwpp_graph_build(const BwppAstModule *module) {
   }
 
   free(builder.bindings);
+  if (entry && entry[0] != '\0' && !found_entry) {
+    bwpp_graph_destroy(graph);
+    return NULL;
+  }
   return graph;
 }
 

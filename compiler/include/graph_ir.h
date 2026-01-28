@@ -93,7 +93,7 @@ typedef struct {
   BwppRegionPolicy policy;
 } BwppGraphRegion;
 
-typedef struct {
+typedef struct BwppGraph {
   BwppGraphNode *nodes;
   uint32_t node_count;
   uint32_t node_capacity;
@@ -120,7 +120,7 @@ enum {
 
 enum { BWPP_GRAPH_OPF_HAS_BIAS = 1u << 0 };
 
-BwppGraph *bwpp_graph_build(const BwppAstModule *module);
+BwppGraph *bwpp_graph_build(const BwppAstModule *module, const char *entry);
 BwppGraph *bwpp_graph_autodiff(const BwppGraph *graph);
 void bwpp_graph_destroy(BwppGraph *graph);
 void bwpp_graph_dump(const BwppGraph *graph, FILE *out);

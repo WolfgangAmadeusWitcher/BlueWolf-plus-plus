@@ -1,4 +1,5 @@
 #include "ir.h"
+#include "graph_ir.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -118,6 +119,63 @@ static uint32_t bwpp_map_flags(uint32_t flags) {
   return out;
 }
 
+static int bwpp_map_graph_op(BwppGraphOpKind op, BwppOpKind *out) {
+  switch (op) {
+    case BWPP_GOP_MATMUL:
+      *out = BWPP_OP_MATMUL;
+      return 1;
+    case BWPP_GOP_BATCH_MATMUL:
+      *out = BWPP_OP_BATCH_MATMUL;
+      return 1;
+    case BWPP_GOP_TRANSPOSE:
+      *out = BWPP_OP_TRANSPOSE;
+      return 1;
+    case BWPP_GOP_PERMUTE:
+      *out = BWPP_OP_PERMUTE;
+      return 1;
+    case BWPP_GOP_RESHAPE:
+      *out = BWPP_OP_RESHAPE;
+      return 1;
+    case BWPP_GOP_ADD:
+      *out = BWPP_OP_ADD;
+      return 1;
+    case BWPP_GOP_SUB:
+      *out = BWPP_OP_SUB;
+      return 1;
+    case BWPP_GOP_MUL:
+      *out = BWPP_OP_MUL;
+      return 1;
+    case BWPP_GOP_DIV:
+      *out = BWPP_OP_DIV;
+      return 1;
+    case BWPP_GOP_REDUCE_SUM:
+      *out = BWPP_OP_REDUCE_SUM;
+      return 1;
+    case BWPP_GOP_REDUCE_MAX:
+      *out = BWPP_OP_REDUCE_MAX;
+      return 1;
+    case BWPP_GOP_SOFTMAX:
+      *out = BWPP_OP_SOFTMAX;
+      return 1;
+    case BWPP_GOP_RMSNORM:
+      *out = BWPP_OP_RMSNORM;
+      return 1;
+    case BWPP_GOP_SILU:
+      *out = BWPP_OP_SILU;
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+static uint32_t bwpp_map_graph_flags(uint32_t flags) {
+  uint32_t out = 0;
+  if (flags & BWPP_GRAPH_OPF_HAS_BIAS) {
+    out |= BWPP_IR_OPF_HAS_BIAS;
+  }
+  return out;
+}
+
 BwppIrModule *bwpp_ir_from_ast(const BwppAstModule *module) {
   BwppIrModule *ir = bwpp_ir_create();
   if (!ir || !module) {
@@ -144,6 +202,43 @@ BwppIrModule *bwpp_ir_from_ast(const BwppAstModule *module) {
       region_id = region_map[op->region_id];
     }
     bwpp_ir_add_node(ir, bwpp_map_op(op->op), region_id, bwpp_map_flags(op->flags));
+  }
+
+  free(region_map);
+  return ir;
+}
+
+BwppIrModule *bwpp_ir_from_graph(const BwppGraph *graph) {
+  BwppIrModule *ir = bwpp_ir_create();
+  if (!ir || !graph) {
+    return ir;
+  }
+
+  uint32_t *region_map = NULL;
+  if (graph->region_count > 0) {
+    region_map = (uint32_t *)calloc(graph->region_count, sizeof(uint32_t));
+  }
+
+  for (uint32_t i = 0; i < graph->region_count; ++i) {
+    const BwppGraphRegion *r = &graph->regions[i];
+    uint32_t id = bwpp_ir_add_region(ir, r->kind, r->policy);
+    if (region_map) {
+      region_map[i] = id;
+    }
+  }
+
+  for (uint32_t i = 0; i < graph->node_count; ++i) {
+    const BwppGraphNode *node = &graph->nodes[i];
+    BwppOpKind op;
+    if (!bwpp_map_graph_op(node->op, &op)) {
+      continue;
+    }
+    uint32_t region_id = BWPP_IR_NO_REGION;
+    if (node->region_id != BWPP_GRAPH_NO_REGION && region_map &&
+        node->region_id < graph->region_count) {
+      region_id = region_map[node->region_id];
+    }
+    bwpp_ir_add_node(ir, op, region_id, bwpp_map_graph_flags(node->flags));
   }
 
   free(region_map);
