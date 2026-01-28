@@ -1,0 +1,11 @@
+fn block_a(x: tensor<f16,[M,K],row_major>, w: tensor<f16,[K,N],row_major>, bias: tensor<f16,[N],row_major>)
+  -> tensor<f16,[M,N],row_major> {
+  let y = add(x @ w, bias)
+  return y
+}
+
+fn block_b(x: tensor<f16,[M,K],row_major>, w: tensor<f16,[K,N],row_major>, bias: tensor<f16,[N],row_major>)
+  -> tensor<f16,[M,N],row_major> {
+  let y = add(x @ w, bias)
+  return y
+}

@@ -48,6 +48,8 @@ See `ROADMAP.md`.
 ## Graphviz
 Generate a forward graph + autodiff graph as DOT files:
 `./compiler/bwppc examples/norms.bwpp out_norm.metal --dot out.dot --grad-dot out_grad.dot`
+Render to PNG:
+`dot -Tpng out.dot -o out.png && dot -Tpng out_grad.dot -o out_grad.png`
 
 ## License
 Apache-2.0.
