@@ -1,0 +1,74 @@
+// BlueWolf++ sample: tiny transformer-ish block
+// Shapes: T=sequence length, D=model width, H=ffn width, V=vocab
+
+fn attn(x: tensor<f16,[T,D],row_major>,
+        wq: tensor<f16,[D,D],row_major>,
+        wk: tensor<f16,[D,D],row_major>,
+        wv: tensor<f16,[D,D],row_major>,
+        wo: tensor<f16,[D,D],row_major>)
+  -> tensor<f16,[T,D],row_major> {
+  let q = x @ wq
+  let k = x @ wk
+  let v = x @ wv
+  let scores = softmax(q @ transpose(k))
+  let ctx = scores @ v
+  let out = ctx @ wo
+  return out
+}
+
+fn ffn(x: tensor<f16,[T,D],row_major>,
+       w1: tensor<f16,[D,H],row_major>,
+       w2: tensor<f16,[H,D],row_major>)
+  -> tensor<f16,[T,D],row_major> {
+  let h = silu(x @ w1)
+  let out = h @ w2
+  return out
+}
+
+fn block(x: tensor<f16,[T,D],row_major>,
+         wq: tensor<f16,[D,D],row_major>,
+         wk: tensor<f16,[D,D],row_major>,
+         wv: tensor<f16,[D,D],row_major>,
+         wo: tensor<f16,[D,D],row_major>,
+         w1: tensor<f16,[D,H],row_major>,
+         w2: tensor<f16,[H,D],row_major>,
+         g1: tensor<f16,[D],row_major>,
+         g2: tensor<f16,[D],row_major>)
+  -> tensor<f16,[T,D],row_major> {
+  let n1 = rmsnorm(x, g1, 1e-5)
+  let a = attn(n1, wq, wk, wv, wo)
+  let x1 = add(x, a)
+  let n2 = rmsnorm(x1, g2, 1e-5)
+  let f = ffn(n2, w1, w2)
+  let out = add(x1, f)
+  return out
+}
+
+fn tiny_model(x: tensor<f16,[T,D],row_major>,
+              wq1: tensor<f16,[D,D],row_major>,
+              wk1: tensor<f16,[D,D],row_major>,
+              wv1: tensor<f16,[D,D],row_major>,
+              wo1: tensor<f16,[D,D],row_major>,
+              w11: tensor<f16,[D,H],row_major>,
+              w21: tensor<f16,[H,D],row_major>,
+              g11: tensor<f16,[D],row_major>,
+              g21: tensor<f16,[D],row_major>,
+              wq2: tensor<f16,[D,D],row_major>,
+              wk2: tensor<f16,[D,D],row_major>,
+              wv2: tensor<f16,[D,D],row_major>,
+              wo2: tensor<f16,[D,D],row_major>,
+              w12: tensor<f16,[D,H],row_major>,
+              w22: tensor<f16,[H,D],row_major>,
+              g12: tensor<f16,[D],row_major>,
+              g22: tensor<f16,[D],row_major>,
+              wcls: tensor<f16,[D,V],row_major>)
+  -> tensor<f16,[T,V],row_major> {
+  let h1 = block(x, wq1, wk1, wv1, wo1, w11, w21, g11, g21)
+  let h2 = block(h1, wq2, wk2, wv2, wo2, w12, w22, g12, g22)
+  let logits = h2 @ wcls
+  let probs = softmax(logits)
+  return probs
+}
+
+// Example call (pseudo):
+// tiny_model(x, wq1, wk1, wv1, wo1, w11, w21, g11, g21, wq2, wk2, wv2, wo2, w12, w22, g12, g22, wcls)
