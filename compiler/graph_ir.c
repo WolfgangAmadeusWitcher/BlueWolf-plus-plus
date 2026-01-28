@@ -890,6 +890,8 @@ static const char *bwpp_op_name(BwppGraphOpKind op) {
     case BWPP_GOP_DIV: return "div";
     case BWPP_GOP_REDUCE_SUM: return "reduce_sum";
     case BWPP_GOP_REDUCE_MAX: return "reduce_max";
+    case BWPP_GOP_REDUCE_MAX_MASK: return "reduce_max_mask";
+    case BWPP_GOP_REDUCE_MAX_GRAD: return "reduce_max_grad";
     case BWPP_GOP_SOFTMAX: return "softmax";
     case BWPP_GOP_RMSNORM: return "rmsnorm";
     case BWPP_GOP_SILU: return "silu";
@@ -1377,13 +1379,30 @@ BwppGraph *bwpp_graph_autodiff(const BwppGraph *graph) {
 
       /* dGamma = reduce_sum(dY * (Y / gamma)) over non-gamma axes */
       uint32_t actY = bwpp_graph_import_activation(grad, graph, act_map, n->output);
-      uint32_t xhat_inputs[2] = { actY, actGamma };
       BwppGraphAttr math_attr = {0};
-      uint32_t xhat = bwpp_graph_add_op_node(grad, BWPP_GOP_DIV, xhat_inputs, 2, &math_attr,
-                                             &grad->values[actY].shape,
-                                             grad->values[actY].dtype,
-                                             grad->values[actY].layout,
-                                             0);
+      uint32_t xhat = BWPP_GRAPH_NO_VALUE;
+      if (n->input_count >= 3) {
+        uint32_t actBeta = bwpp_graph_import_activation(grad, graph, act_map, n->inputs[2]);
+        uint32_t sub_inputs[2] = { actY, actBeta };
+        uint32_t y_minus_beta = bwpp_graph_add_op_node(grad, BWPP_GOP_SUB, sub_inputs, 2, &math_attr,
+                                                       &grad->values[actY].shape,
+                                                       grad->values[actY].dtype,
+                                                       grad->values[actY].layout,
+                                                       0);
+        uint32_t div_inputs[2] = { y_minus_beta, actGamma };
+        xhat = bwpp_graph_add_op_node(grad, BWPP_GOP_DIV, div_inputs, 2, &math_attr,
+                                      &grad->values[actY].shape,
+                                      grad->values[actY].dtype,
+                                      grad->values[actY].layout,
+                                      0);
+      } else {
+        uint32_t div_inputs[2] = { actY, actGamma };
+        xhat = bwpp_graph_add_op_node(grad, BWPP_GOP_DIV, div_inputs, 2, &math_attr,
+                                      &grad->values[actY].shape,
+                                      grad->values[actY].dtype,
+                                      grad->values[actY].layout,
+                                      0);
+      }
       uint32_t mul_inputs[2] = { dY, xhat };
       uint32_t dgamma_raw = bwpp_graph_add_op_node(grad, BWPP_GOP_MUL, mul_inputs, 2, &math_attr,
                                                    &grad->values[dY].shape,
@@ -1410,8 +1429,23 @@ BwppGraph *bwpp_graph_autodiff(const BwppGraph *graph) {
     }
 
     if (n->op == BWPP_GOP_REDUCE_MAX && n->input_count >= 1) {
-      fprintf(stderr, "autodiff: reduce_max grad not implemented\n");
-      grad_map[n->inputs[0]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[0]], dY);
+      uint32_t actX = bwpp_graph_import_activation(grad, graph, act_map, n->inputs[0]);
+      BwppShape in_shape = graph->values[n->inputs[0]].shape;
+      BwppGraphAttr attr = n->attr;
+      uint32_t mask_inputs[1] = { actX };
+      uint32_t mask = bwpp_graph_add_op_node(grad, BWPP_GOP_REDUCE_MAX_MASK, mask_inputs, 1, &attr,
+                                             &grad->values[actX].shape,
+                                             grad->values[actX].dtype,
+                                             grad->values[actX].layout,
+                                             0);
+      uint32_t dYb = bwpp_graph_broadcast_to_shape(grad, dY, &in_shape);
+      uint32_t grad_inputs[2] = { mask, dYb };
+      uint32_t dX = bwpp_graph_add_op_node(grad, BWPP_GOP_REDUCE_MAX_GRAD, grad_inputs, 2, &attr,
+                                           &grad->values[actX].shape,
+                                           grad->values[actX].dtype,
+                                           grad->values[actX].layout,
+                                           0);
+      grad_map[n->inputs[0]] = bwpp_graph_accum_grad(grad, grad_map[n->inputs[0]], dX);
       continue;
     }
 

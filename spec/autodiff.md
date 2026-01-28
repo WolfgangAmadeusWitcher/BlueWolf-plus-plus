@@ -26,7 +26,7 @@ Gradients are produced as a new graph that shares the same static shapes.
 - `transpose/permute`: gradient is inverse permutation.
 - `reshape`: gradient reshapes back to input shape.
 - `reduce_sum`: expand gradient to input shape.
-- `reduce_max`: requires argmax mask; in reversible regions recompute inputs.
+- `reduce_max`: uses argmax/mask; in reversible regions recompute inputs.
 - `softmax`: uses Jacobian-vector product; in reversible regions recompute.
 - `rmsnorm`: dX via rmsnorm_grad op; dGamma/dBeta use reduce_sum on normalized output.
 - `silu`: uses sigmoid(x); recompute if reversible.
@@ -34,7 +34,7 @@ Gradients are produced as a new graph that shares the same static shapes.
 ## Internal grad ops (skeleton)
 The compiler emits internal gradient nodes in the autodiff graph for ops
 that don’t yet have a full expansion in v0.1:
-`silu_grad`, `softmax_grad`, `rmsnorm_grad`.
+`silu_grad`, `softmax_grad`, `rmsnorm_grad`, `reduce_max_mask`, `reduce_max_grad`, `broadcast`.
 
 ## Save vs recompute policy
 Default behavior is to store necessary intermediates unless a reversible

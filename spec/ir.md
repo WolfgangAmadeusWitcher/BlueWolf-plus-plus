@@ -9,6 +9,7 @@ The IR is a static tensor graph:
 - `matmul`, `batch_matmul`
 - `transpose`, `permute`, `reshape`
 - `broadcast` (internal)
+- `reduce_max_mask`, `reduce_max_grad` (internal)
 - `add`, `sub`, `mul`, `div`
 - `reduce_sum`, `reduce_max`
 - `softmax`

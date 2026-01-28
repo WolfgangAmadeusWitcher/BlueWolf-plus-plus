@@ -111,10 +111,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  BwppGraph *graph = NULL;
-  if (dot_path || grad_dot_path || mem_plan_path || attn_report) {
-    graph = bwpp_graph_build(module);
-  }
+  BwppGraph *graph = bwpp_graph_build(module);
 
   if (dot_path && graph) {
     FILE *dot = fopen(dot_path, "w");
