@@ -31,6 +31,19 @@ void bwpp_cpu_rmsnorm_f32(const float *x,
                           uint32_t ld,
                           float eps);
 
+void bwpp_cpu_attention_f32(const float *q,
+                            const float *k,
+                            const float *v,
+                            float *o,
+                            uint32_t M,
+                            uint32_t N,
+                            uint32_t K,
+                            uint32_t D,
+                            uint32_t ldq,
+                            uint32_t ldk,
+                            uint32_t ldv,
+                            uint32_t ldo);
+
 void bwpp_cpu_reduce_max_mask_f32(const float *x,
                                   float *mask,
                                   uint32_t rows,

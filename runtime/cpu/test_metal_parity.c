@@ -230,6 +230,77 @@ static int test_rmsnorm(const char *src) {
   return 1;
 }
 
+static int test_attention(const char *src) {
+  if (!strstr(src, "bwpp.meta: kernel=attention_f16")) {
+    return 0;
+  }
+  const uint32_t M = 2;
+  const uint32_t N = 3;
+  const uint32_t K = 4;
+  const uint32_t D = 5;
+  float q[M * K];
+  float k[N * K];
+  float v[N * D];
+  float o[M * D];
+  float ref[M * D];
+  fill_matrix(q, M, K, 0.03f);
+  fill_matrix(k, N, K, 0.04f);
+  fill_matrix(v, N, D, 0.02f);
+  for (uint32_t i = 0; i < M * D; ++i) {
+    o[i] = 0.0f;
+    ref[i] = 0.0f;
+  }
+
+  for (uint32_t m = 0; m < M; ++m) {
+    float maxv = -INFINITY;
+    for (uint32_t n = 0; n < N; ++n) {
+      float acc = 0.0f;
+      for (uint32_t kk = 0; kk < K; ++kk) {
+        acc += q[m * K + kk] * k[n * K + kk];
+      }
+      if (acc > maxv) {
+        maxv = acc;
+      }
+    }
+    float sum = 0.0f;
+    for (uint32_t n = 0; n < N; ++n) {
+      float acc = 0.0f;
+      for (uint32_t kk = 0; kk < K; ++kk) {
+        acc += q[m * K + kk] * k[n * K + kk];
+      }
+      sum += expf(acc - maxv);
+    }
+    float inv = sum > 0.0f ? (1.0f / sum) : 0.0f;
+    for (uint32_t d = 0; d < D; ++d) {
+      float out = 0.0f;
+      for (uint32_t n = 0; n < N; ++n) {
+        float acc = 0.0f;
+        for (uint32_t kk = 0; kk < K; ++kk) {
+          acc += q[m * K + kk] * k[n * K + kk];
+        }
+        float w = expf(acc - maxv) * inv;
+        out += w * v[n * D + d];
+      }
+      ref[m * D + d] = out;
+    }
+  }
+
+  bwpp_cpu_attention_f32(q, k, v, o, M, N, K, D, K, K, D, D);
+  float max_err = 0.0f;
+  for (uint32_t i = 0; i < M * D; ++i) {
+    float diff = fabsf(o[i] - ref[i]);
+    if (diff > max_err) {
+      max_err = diff;
+    }
+  }
+  if (max_err > 1e-5f) {
+    fprintf(stderr, "CPU FAIL attention max_err=%.6f\n", max_err);
+    return -1;
+  }
+  printf("CPU PASS attention max_err=%.6f\n", max_err);
+  return 1;
+}
+
 int main(int argc, char **argv) {
   if (argc < 2) {
     fprintf(stderr, "usage: %s <output.metal>\n", argv[0]);
@@ -258,6 +329,13 @@ int main(int argc, char **argv) {
     }
   }
   r = test_rmsnorm(src);
+  if (r != 0) {
+    ran = 1;
+    if (r < 0) {
+      rc = 1;
+    }
+  }
+  r = test_attention(src);
   if (r != 0) {
     ran = 1;
     if (r < 0) {

@@ -89,6 +89,60 @@ void bwpp_cpu_rmsnorm_f32(const float *x,
   }
 }
 
+void bwpp_cpu_attention_f32(const float *q,
+                            const float *k,
+                            const float *v,
+                            float *o,
+                            uint32_t M,
+                            uint32_t N,
+                            uint32_t K,
+                            uint32_t D,
+                            uint32_t ldq,
+                            uint32_t ldk,
+                            uint32_t ldv,
+                            uint32_t ldo) {
+  if (!q || !k || !v || !o) {
+    return;
+  }
+  for (uint32_t m = 0; m < M; ++m) {
+    const uint32_t q_off = m * ldq;
+    float maxv = -INFINITY;
+    for (uint32_t n = 0; n < N; ++n) {
+      const uint32_t k_off = n * ldk;
+      float acc = 0.0f;
+      for (uint32_t kk = 0; kk < K; ++kk) {
+        acc += q[q_off + kk] * k[k_off + kk];
+      }
+      if (acc > maxv) {
+        maxv = acc;
+      }
+    }
+    float sum = 0.0f;
+    for (uint32_t n = 0; n < N; ++n) {
+      const uint32_t k_off = n * ldk;
+      float acc = 0.0f;
+      for (uint32_t kk = 0; kk < K; ++kk) {
+        acc += q[q_off + kk] * k[k_off + kk];
+      }
+      sum += expf(acc - maxv);
+    }
+    float inv = sum > 0.0f ? (1.0f / sum) : 0.0f;
+    for (uint32_t d = 0; d < D; ++d) {
+      float out = 0.0f;
+      for (uint32_t n = 0; n < N; ++n) {
+        const uint32_t k_off = n * ldk;
+        float acc = 0.0f;
+        for (uint32_t kk = 0; kk < K; ++kk) {
+          acc += q[q_off + kk] * k[k_off + kk];
+        }
+        float w = expf(acc - maxv) * inv;
+        out += w * v[n * ldv + d];
+      }
+      o[m * ldo + d] = out;
+    }
+  }
+}
+
 void bwpp_cpu_reduce_max_mask_f32(const float *x,
                                   float *mask,
                                   uint32_t rows,

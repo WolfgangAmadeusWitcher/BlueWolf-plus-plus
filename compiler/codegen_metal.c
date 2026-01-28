@@ -333,7 +333,11 @@ BwppStatus bwpp_codegen_metal(const BwppIrModule *ir, const char *out_path) {
       }
       fprintf(f, "// bwpp.meta: epilogue=%s\n", ep);
     }
-    fputs("// bwpp.meta: params=M,N,K,lda,ldb,ldc\n\n", f);
+    if (has_attention) {
+      fputs("// bwpp.meta: params=M,N,K,D,ldq,ldk,ldv,ldo\n\n", f);
+    } else {
+      fputs("// bwpp.meta: params=M,N,K,lda,ldb,ldc\n\n", f);
+    }
     if (has_attention && tile) {
       for (uint32_t i = 0; i < tile->op_count; ++i) {
         const BwppTileOp *op = &tile->ops[i];
@@ -433,6 +437,11 @@ BwppStatus bwpp_codegen_metal(const BwppIrModule *ir, const char *out_path) {
       fputs("  uint M;\n", f);
       fputs("  uint N;\n", f);
       fputs("  uint K;\n", f);
+      fputs("  uint D;\n", f);
+      fputs("  uint ldq;\n", f);
+      fputs("  uint ldk;\n", f);
+      fputs("  uint ldv;\n", f);
+      fputs("  uint ldo;\n", f);
       fputs("};\n\n", f);
       fputs("kernel void bwpp_attention_f16(\n", f);
       fputs("    device const half *Q [[buffer(0)]],\n", f);
@@ -441,8 +450,40 @@ BwppStatus bwpp_codegen_metal(const BwppIrModule *ir, const char *out_path) {
       fputs("    device half *O [[buffer(3)]],\n", f);
       fputs("    constant BwppAttentionParams &p [[buffer(4)]],\n", f);
       fputs("    uint gid [[thread_position_in_grid]]) {\n", f);
-      fputs("  if (gid >= p.M * p.N) { return; }\n", f);
-      fputs("  O[gid] = half(0.0f);\n", f);
+      fputs("  uint m = gid / p.D;\n", f);
+      fputs("  uint d = gid - m * p.D;\n", f);
+      fputs("  if (m >= p.M || d >= p.D) { return; }\n", f);
+      fputs("  const uint q_off = m * p.ldq;\n", f);
+      fputs("  float maxv = -INFINITY;\n", f);
+      fputs("  for (uint n = 0; n < p.N; ++n) {\n", f);
+      fputs("    const uint k_off = n * p.ldk;\n", f);
+      fputs("    float acc = 0.0f;\n", f);
+      fputs("    for (uint kk = 0; kk < p.K; ++kk) {\n", f);
+      fputs("      acc += float(Q[q_off + kk]) * float(K[k_off + kk]);\n", f);
+      fputs("    }\n", f);
+      fputs("    maxv = max(maxv, acc);\n", f);
+      fputs("  }\n", f);
+      fputs("  float sum = 0.0f;\n", f);
+      fputs("  for (uint n = 0; n < p.N; ++n) {\n", f);
+      fputs("    const uint k_off = n * p.ldk;\n", f);
+      fputs("    float acc = 0.0f;\n", f);
+      fputs("    for (uint kk = 0; kk < p.K; ++kk) {\n", f);
+      fputs("      acc += float(Q[q_off + kk]) * float(K[k_off + kk]);\n", f);
+      fputs("    }\n", f);
+      fputs("    sum += exp(acc - maxv);\n", f);
+      fputs("  }\n", f);
+      fputs("  float inv = sum > 0.0f ? (1.0f / sum) : 0.0f;\n", f);
+      fputs("  float out = 0.0f;\n", f);
+      fputs("  for (uint n = 0; n < p.N; ++n) {\n", f);
+      fputs("    const uint k_off = n * p.ldk;\n", f);
+      fputs("    float acc = 0.0f;\n", f);
+      fputs("    for (uint kk = 0; kk < p.K; ++kk) {\n", f);
+      fputs("      acc += float(Q[q_off + kk]) * float(K[k_off + kk]);\n", f);
+      fputs("    }\n", f);
+      fputs("    float w = exp(acc - maxv) * inv;\n", f);
+      fputs("    out += w * float(V[n * p.ldv + d]);\n", f);
+      fputs("  }\n", f);
+      fputs("  O[m * p.ldo + d] = half(out);\n", f);
       fputs("}\n", f);
     }
   }
