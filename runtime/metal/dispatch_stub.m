@@ -3,6 +3,13 @@
 #include <stdio.h>
 #include <string.h>
 
+typedef struct {
+  __strong id<MTLDevice> device;
+  __strong NSString *source;
+  __strong id<MTLLibrary> library;
+  __strong id<MTLComputePipelineState> pso;
+} BwppPipelineCache;
+
 static id<MTLLibrary> bwpp_build_library(id<MTLDevice> device, NSString *mslSource) {
   NSError *error = nil;
   id<MTLLibrary> library = [device newLibraryWithSource:mslSource options:nil error:&error];
@@ -21,6 +28,30 @@ static id<MTLComputePipelineState> bwpp_build_pipeline(id<MTLDevice> device,
     return nil;
   }
   id<MTLComputePipelineState> pso = [device newComputePipelineStateWithFunction:func error:&error];
+  return pso;
+}
+
+static id<MTLComputePipelineState> bwpp_get_cached_pipeline(BwppPipelineCache *cache,
+                                                            id<MTLDevice> device,
+                                                            NSString *mslSource,
+                                                            NSString *name) {
+  if (cache->pso && cache->device == device && cache->source &&
+      [cache->source isEqualToString:mslSource]) {
+    return cache->pso;
+  }
+
+  id<MTLLibrary> library = bwpp_build_library(device, mslSource);
+  if (!library) {
+    return nil;
+  }
+  id<MTLComputePipelineState> pso = bwpp_build_pipeline(device, library, name);
+  if (!pso) {
+    return nil;
+  }
+  cache->device = device;
+  cache->source = mslSource;
+  cache->library = library;
+  cache->pso = pso;
   return pso;
 }
 
@@ -47,6 +78,7 @@ void bwpp_metal_dispatch_matmul(id<MTLDevice> device,
     return;
   }
 
+  static BwppPipelineCache cache = {0};
   uint32_t tileM = 0;
   uint32_t tileN = 0;
   uint32_t tileK = 0;
@@ -59,12 +91,8 @@ void bwpp_metal_dispatch_matmul(id<MTLDevice> device,
     }
   }
 
-  id<MTLLibrary> library = bwpp_build_library(device, mslSource);
-  if (!library) {
-    return;
-  }
-
-  id<MTLComputePipelineState> pso = bwpp_build_pipeline(device, library, @"bwpp_matmul_f16");
+  id<MTLComputePipelineState> pso = bwpp_get_cached_pipeline(&cache, device, mslSource,
+                                                             @"bwpp_matmul_f16");
   if (!pso) {
     return;
   }
@@ -129,11 +157,9 @@ void bwpp_metal_dispatch_softmax(id<MTLDevice> device,
     return;
   }
 
-  id<MTLLibrary> library = bwpp_build_library(device, mslSource);
-  if (!library) {
-    return;
-  }
-  id<MTLComputePipelineState> pso = bwpp_build_pipeline(device, library, @"bwpp_softmax_f16");
+  static BwppPipelineCache cache = {0};
+  id<MTLComputePipelineState> pso = bwpp_get_cached_pipeline(&cache, device, mslSource,
+                                                             @"bwpp_softmax_f16");
   if (!pso) {
     return;
   }
@@ -176,11 +202,9 @@ void bwpp_metal_dispatch_rmsnorm(id<MTLDevice> device,
     return;
   }
 
-  id<MTLLibrary> library = bwpp_build_library(device, mslSource);
-  if (!library) {
-    return;
-  }
-  id<MTLComputePipelineState> pso = bwpp_build_pipeline(device, library, @"bwpp_rmsnorm_f16");
+  static BwppPipelineCache cache = {0};
+  id<MTLComputePipelineState> pso = bwpp_get_cached_pipeline(&cache, device, mslSource,
+                                                             @"bwpp_rmsnorm_f16");
   if (!pso) {
     return;
   }
@@ -248,6 +272,7 @@ void bwpp_metal_dispatch_attention(id<MTLDevice> device,
     return;
   }
 
+  static BwppPipelineCache cache = {0};
   uint32_t tileM = 0;
   uint32_t tileN = 0;
   uint32_t tileK = 0;
@@ -260,12 +285,8 @@ void bwpp_metal_dispatch_attention(id<MTLDevice> device,
     }
   }
 
-  id<MTLLibrary> library = bwpp_build_library(device, mslSource);
-  if (!library) {
-    return;
-  }
-
-  id<MTLComputePipelineState> pso = bwpp_build_pipeline(device, library, @"bwpp_attention_f16");
+  id<MTLComputePipelineState> pso = bwpp_get_cached_pipeline(&cache, device, mslSource,
+                                                             @"bwpp_attention_f16");
   if (!pso) {
     return;
   }
