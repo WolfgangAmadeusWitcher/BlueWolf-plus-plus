@@ -1,0 +1,6 @@
+fn norms(x: tensor<f16,[B,N],row_major>, w: tensor<f16,[N,N],row_major>, gamma: tensor<f16,[N],row_major>)
+  -> tensor<f16,[B,N],row_major> {
+  let y = x @ w
+  let s = softmax(y)
+  return rmsnorm(s, gamma, 1e-5)
+}

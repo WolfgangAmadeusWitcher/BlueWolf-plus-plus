@@ -1,0 +1,4 @@
+fn matmul(a: tensor<f16,[M,K],row_major>, b: tensor<f16,[K,N],row_major>)
+  -> tensor<f16,[M,N],row_major> {
+  return a @ b
+}

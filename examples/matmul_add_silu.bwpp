@@ -1,0 +1,7 @@
+fn fused(a: tensor<f16,[M,K],row_major>,
+         b: tensor<f16,[K,N],row_major>,
+         bias: tensor<f16,[N],row_major>)
+  -> tensor<f16,[M,N],row_major> {
+  let y = add(a @ b, bias)
+  return silu(y)
+}

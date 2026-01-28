@@ -1,0 +1,7 @@
+fn attention(q: tensor<f16,[B,H,T,D],row_major>,
+             k: tensor<f16,[B,H,T,D],row_major>,
+             v: tensor<f16,[B,H,T,D],row_major>)
+  -> tensor<f16,[B,H,T,D],row_major> {
+  let scores = softmax(q @ transpose(k))
+  return scores @ v
+}

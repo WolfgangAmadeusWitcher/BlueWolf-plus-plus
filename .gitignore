@@ -1,0 +1,17 @@
+# Build
+/compiler/*.o
+/compiler/bwppc
+
+# Outputs
+*.metal
+*.metallib
+*.air
+.metal_out/
+runtime/metal/bwpp_metal_test
+runtime/metal/bwpp_metal_norm_test
+runtime/cpu/bwpp_cpu_test
+runtime/cpu/bwpp_cpu_norm_test
+runtime/cpu/bwpp_cpu_metal_test
+
+# OS
+.DS_Store
