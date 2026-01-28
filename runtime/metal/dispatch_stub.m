@@ -1,4 +1,5 @@
 #import "dispatch_stub.h"
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -223,6 +224,84 @@ void bwpp_metal_dispatch_rmsnorm(id<MTLDevice> device,
   NSUInteger w = pso.threadExecutionWidth;
   MTLSize tg = MTLSizeMake(w, 1, 1);
   [enc dispatchThreads:grid threadsPerThreadgroup:tg];
+  [enc endEncoding];
+  [cmd commit];
+  [cmd waitUntilCompleted];
+}
+
+void bwpp_metal_dispatch_attention(id<MTLDevice> device,
+                                   id<MTLCommandQueue> queue,
+                                   id<MTLBuffer> q,
+                                   id<MTLBuffer> k,
+                                   id<MTLBuffer> v,
+                                   id<MTLBuffer> o,
+                                   BwppAttentionParams params,
+                                   NSString *mslSource) {
+  if (!device || !queue || !q || !k || !v || !o || !mslSource) {
+    return;
+  }
+  const char *src = [mslSource UTF8String];
+  if (!src) {
+    return;
+  }
+  if (strstr(src, "bwpp.meta: kernel=attention_f16") == NULL) {
+    return;
+  }
+
+  uint32_t tileM = 0;
+  uint32_t tileN = 0;
+  uint32_t tileK = 0;
+  const char *tilePtr = strstr(src, "bwpp.meta: tile=");
+  if (tilePtr) {
+    if (sscanf(tilePtr, "bwpp.meta: tile=%u,%u,%u", &tileM, &tileN, &tileK) != 3) {
+      tileM = 0;
+      tileN = 0;
+      tileK = 0;
+    }
+  }
+
+  id<MTLLibrary> library = bwpp_build_library(device, mslSource);
+  if (!library) {
+    return;
+  }
+
+  id<MTLComputePipelineState> pso = bwpp_build_pipeline(device, library, @"bwpp_attention_f16");
+  if (!pso) {
+    return;
+  }
+
+  id<MTLBuffer> paramsBuf = [device newBufferWithBytes:&params
+                                                length:sizeof(BwppAttentionParams)
+                                               options:MTLResourceStorageModeShared];
+
+  uint32_t tile = tileM;
+  if (tile == 0) {
+    NSUInteger maxThreads = pso.maxTotalThreadsPerThreadgroup;
+    NSUInteger side = (NSUInteger)sqrt((double)maxThreads);
+    if (side == 0) {
+      side = 1;
+    }
+    tile = (uint32_t)side;
+  }
+  NSUInteger total = pso.maxTotalThreadsPerThreadgroup;
+  if ((NSUInteger)tile * (NSUInteger)tile > total) {
+    return;
+  }
+
+  id<MTLCommandBuffer> cmd = [queue commandBuffer];
+  id<MTLComputeCommandEncoder> enc = [cmd computeCommandEncoder];
+  [enc setComputePipelineState:pso];
+  [enc setBuffer:q offset:0 atIndex:0];
+  [enc setBuffer:k offset:0 atIndex:1];
+  [enc setBuffer:v offset:0 atIndex:2];
+  [enc setBuffer:o offset:0 atIndex:3];
+  [enc setBuffer:paramsBuf offset:0 atIndex:4];
+
+  MTLSize tg = MTLSizeMake(tile, tile, 1);
+  MTLSize grid = MTLSizeMake((params.D + tile - 1) / tile,
+                             (params.M + tile - 1) / tile,
+                             1);
+  [enc dispatchThreadgroups:grid threadsPerThreadgroup:tg];
   [enc endEncoding];
   [cmd commit];
   [cmd waitUntilCompleted];

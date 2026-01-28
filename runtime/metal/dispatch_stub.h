@@ -28,6 +28,17 @@ typedef struct {
   float eps;
 } BwppRmsnormParams;
 
+typedef struct {
+  uint32_t M;
+  uint32_t N;
+  uint32_t K;
+  uint32_t D;
+  uint32_t ldq;
+  uint32_t ldk;
+  uint32_t ldv;
+  uint32_t ldo;
+} BwppAttentionParams;
+
 void bwpp_metal_dispatch_matmul(id<MTLDevice> device,
                                 id<MTLCommandQueue> queue,
                                 id<MTLBuffer> a,
@@ -52,6 +63,15 @@ void bwpp_metal_dispatch_rmsnorm(id<MTLDevice> device,
                                  id<MTLBuffer> y,
                                  BwppRmsnormParams params,
                                  NSString *mslSource);
+
+void bwpp_metal_dispatch_attention(id<MTLDevice> device,
+                                   id<MTLCommandQueue> queue,
+                                   id<MTLBuffer> q,
+                                   id<MTLBuffer> k,
+                                   id<MTLBuffer> v,
+                                   id<MTLBuffer> o,
+                                   BwppAttentionParams params,
+                                   NSString *mslSource);
 
 #ifdef __cplusplus
 }
