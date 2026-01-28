@@ -45,6 +45,8 @@ See `ROADMAP.md`.
 - Reduce-max grad test: `./runtime/cpu/bwpp_cpu_reduce_max_test`
 - CPU Metal-parity tests (generate `.metal` from examples and validate via CPU ref):
   `make -C runtime/cpu cpu-metal-tests`
+- Metal tests (requires macOS + Metal device):
+  `make -C runtime/metal metal-tests`
 - Memory planner report:
   `./compiler/bwppc examples/norms.bwpp out_norm.metal --mem-plan mem_plan.txt`
 
@@ -55,6 +57,8 @@ See `ROADMAP.md`.
 - Compare against MLX (Metal baseline, optional): `python3 bench/bench_compare.py`
 - Create/update CPU baseline: `python3 bench/bench_regress.py --update`
 - Regression check (CPU): `python3 bench/bench_regress.py --tol 0.2`
+- Metal benchmark (requires macOS + Metal device):
+  `./runtime/metal/bwpp_metal_bench --msl out_attention.metal --iters 10`
 
 ## Graphviz
 Generate a forward graph + autodiff graph as DOT files:
