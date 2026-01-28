@@ -47,3 +47,7 @@ node2 = silu(node1) : tensor<f16,[M,N],row_major>
 
 ## Lowering
 - Graph -> fused regions -> kernel IR -> MSL source
+
+## Graph dumps
+`bwppc` can emit a DOT graph of the forward IR and autodiff IR:
+`bwppc input.bwpp out.metal --dot out.dot --grad-dot out_grad.dot`

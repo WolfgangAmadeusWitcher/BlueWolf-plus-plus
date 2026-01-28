@@ -70,13 +70,41 @@ BwppToken bwpp_lexer_next(BwppLexer *lx) {
     size_t len = (size_t)(lx->input + lx->pos - start);
     return bwpp_make_token(BWPP_TOK_IDENT, start, len);
   }
-  if (isdigit(c)) {
-    lx->pos++;
-    while (lx->pos < lx->length && isdigit((unsigned char)lx->input[lx->pos])) {
-      lx->pos++;
+  if (isdigit(c) || (c == '.' && lx->pos + 1 < lx->length && isdigit((unsigned char)lx->input[lx->pos + 1]))) {
+    size_t pos = lx->pos;
+    int saw_digit = 0;
+    if (lx->input[pos] == '.') {
+      pos++;
     }
-    size_t len = (size_t)(lx->input + lx->pos - start);
-    return bwpp_make_token(BWPP_TOK_NUMBER, start, len);
+    while (pos < lx->length && isdigit((unsigned char)lx->input[pos])) {
+      pos++;
+      saw_digit = 1;
+    }
+    if (pos < lx->length && lx->input[pos] == '.') {
+      pos++;
+      while (pos < lx->length && isdigit((unsigned char)lx->input[pos])) {
+        pos++;
+        saw_digit = 1;
+      }
+    }
+    if (saw_digit && pos < lx->length && (lx->input[pos] == 'e' || lx->input[pos] == 'E')) {
+      size_t exp = pos + 1;
+      if (exp < lx->length && (lx->input[exp] == '+' || lx->input[exp] == '-')) {
+        exp++;
+      }
+      size_t exp_start = exp;
+      while (exp < lx->length && isdigit((unsigned char)lx->input[exp])) {
+        exp++;
+      }
+      if (exp > exp_start) {
+        pos = exp;
+      }
+    }
+    if (saw_digit) {
+      lx->pos = pos;
+      size_t len = (size_t)(lx->input + lx->pos - start);
+      return bwpp_make_token(BWPP_TOK_NUMBER, start, len);
+    }
   }
 
   lx->pos++;

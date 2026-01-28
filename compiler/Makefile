@@ -9,6 +9,7 @@ SRCS = \
   ast.c \
   typecheck.c \
   ir.c \
+  graph_ir.c \
   tile_ir.c \
   codegen_metal.c
 

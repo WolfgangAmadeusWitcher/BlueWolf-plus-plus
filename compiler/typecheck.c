@@ -181,6 +181,35 @@ static const BwppParam *bwpp_find_param(const BwppParam *params, uint32_t count,
   return NULL;
 }
 
+static BwppStatus bwpp_finalize_fn(int saw_bias_add,
+                                   int saw_matmul,
+                                   int bias_shape_known,
+                                   BwppShape bias_shape,
+                                   BwppStr matmul_out1) {
+  if (saw_bias_add && !saw_matmul) {
+    fprintf(stderr, "typecheck: add(bias) without matmul context\n");
+    return BWPP_ERR;
+  }
+  if (saw_bias_add && saw_matmul && bias_shape_known && matmul_out1.ptr) {
+    int ok = 0;
+    if (bias_shape.rank == 1) {
+      ok = bwpp_str_eq_str(bias_shape.dims[0], matmul_out1);
+    } else if (bias_shape.rank == 2) {
+      int d0_is_one = bwpp_str_eq(bias_shape.dims[0], "1");
+      int d1_is_one = bwpp_str_eq(bias_shape.dims[1], "1");
+      if ((d0_is_one && bwpp_str_eq_str(bias_shape.dims[1], matmul_out1)) ||
+          (d1_is_one && bwpp_str_eq_str(bias_shape.dims[0], matmul_out1))) {
+        ok = 1;
+      }
+    }
+    if (!ok) {
+      fprintf(stderr, "typecheck: bias shape does not match matmul N dimension\n");
+      return BWPP_ERR;
+    }
+  }
+  return BWPP_OK;
+}
+
 BwppStatus bwpp_typecheck_module(const BwppAstModule *module) {
   if (!module || !module->source) {
     return BWPP_OK;
@@ -199,15 +228,58 @@ BwppStatus bwpp_typecheck_module(const BwppAstModule *module) {
   int bias_shape_known = 0;
 
   BwppStr last_ident = (BwppStr){0};
+  int brace_depth = 0;
+  int fn_body_depth = 0;
+  int pending_fn_body = 0;
+  int in_fn = 0;
 
   for (;;) {
     BwppToken tok = bwpp_lexer_next(&lx);
     if (tok.kind == BWPP_TOK_EOF) {
       break;
     }
+    if (tok.kind == BWPP_TOK_SYMBOL && tok.length == 1) {
+      char ch = tok.lexeme[0];
+      if (ch == '{') {
+        brace_depth++;
+        if (pending_fn_body) {
+          fn_body_depth = brace_depth;
+          pending_fn_body = 0;
+        }
+        continue;
+      }
+      if (ch == '}') {
+        if (in_fn && brace_depth == fn_body_depth) {
+          if (bwpp_finalize_fn(saw_bias_add, saw_matmul, bias_shape_known, bias_shape, matmul_out1) != BWPP_OK) {
+            return BWPP_ERR;
+          }
+          in_fn = 0;
+          fn_body_depth = 0;
+        }
+        if (brace_depth > 0) {
+          brace_depth--;
+        }
+        continue;
+      }
+    }
     if (bwpp_tok_is(&tok, "fn")) {
+      if (in_fn) {
+        if (bwpp_finalize_fn(saw_bias_add, saw_matmul, bias_shape_known, bias_shape, matmul_out1) != BWPP_OK) {
+          return BWPP_ERR;
+        }
+      }
       BwppToken name = bwpp_lexer_next(&lx);
       (void)name;
+      param_count = 0;
+      matmul_out0 = (BwppStr){0};
+      matmul_out1 = (BwppStr){0};
+      saw_matmul = 0;
+      saw_bias_add = 0;
+      bias_shape = (BwppShape){0};
+      bias_shape_known = 0;
+      last_ident = (BwppStr){0};
+      in_fn = 1;
+      pending_fn_body = 1;
       if (!bwpp_parse_params(&lx, params, &param_count)) {
         fprintf(stderr, "typecheck: failed to parse params\n");
         return BWPP_ERR;

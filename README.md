@@ -45,5 +45,9 @@ See `ROADMAP.md`.
 - CPU Metal-parity tests (generate `.metal` from examples and validate via CPU ref):
   `make -C runtime/cpu cpu-metal-tests`
 
+## Graphviz
+Generate a forward graph + autodiff graph as DOT files:
+`./compiler/bwppc examples/norms.bwpp out_norm.metal --dot out.dot --grad-dot out_grad.dot`
+
 ## License
 Apache-2.0.

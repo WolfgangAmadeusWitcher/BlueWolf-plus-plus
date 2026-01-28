@@ -31,6 +31,11 @@ Gradients are produced as a new graph that shares the same static shapes.
 - `rmsnorm`: requires input stats; recompute if reversible.
 - `silu`: uses sigmoid(x); recompute if reversible.
 
+## Internal grad ops (skeleton)
+The compiler emits internal gradient nodes in the autodiff graph for ops
+that don’t yet have a full expansion in v0.1:
+`silu_grad`, `softmax_grad`, `rmsnorm_grad`.
+
 ## Save vs recompute policy
 Default behavior is to store necessary intermediates unless a reversible
 region is active. The scheduler uses a cost model to decide recompute in
