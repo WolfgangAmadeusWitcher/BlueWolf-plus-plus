@@ -9,5 +9,8 @@ bwpp_bench: bench_cpu.c ../runtime/cpu/bwpp_cpu_ref.c
 compare: bwpp_bench
 	python3 bench_compare.py --iters 10 --m 256 --n 256 --k 256
 
+regress: bwpp_bench
+	python3 bench_regress.py --baseline bench/baseline_cpu.json
+
 clean:
 	rm -f bwpp_bench

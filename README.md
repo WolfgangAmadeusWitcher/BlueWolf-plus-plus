@@ -53,6 +53,8 @@ See `ROADMAP.md`.
 - Run: `./bench/bwpp_bench --iters 10 --m 256 --n 256 --k 256`
 - Include Metal metadata: `./bench/bwpp_bench --metal out_tiny.metal`
 - Compare against MLX (Metal baseline, optional): `python3 bench/bench_compare.py`
+- Create/update CPU baseline: `python3 bench/bench_regress.py --update`
+- Regression check (CPU): `python3 bench/bench_regress.py --tol 0.2`
 
 ## Graphviz
 Generate a forward graph + autodiff graph as DOT files:

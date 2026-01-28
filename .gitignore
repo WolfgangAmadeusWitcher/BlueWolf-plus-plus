@@ -14,6 +14,7 @@ runtime/cpu/bwpp_cpu_norm_test
 runtime/cpu/bwpp_cpu_metal_test
 runtime/cpu/bwpp_cpu_reduce_max_test
 bench/bwpp_bench
+bench/baseline_cpu.json
 
 # OS
 .DS_Store

@@ -37,7 +37,10 @@ static void parse_meta(const char *path) {
 int main(int argc, char **argv) {
   uint32_t M = 256, N = 256, K = 256;
   uint32_t iters = 10;
+  uint32_t rows = 256;
+  uint32_t cols = 256;
   const char *metal_path = NULL;
+  const char *json_path = NULL;
 
   for (int i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--iters") == 0 && i + 1 < argc) {
@@ -48,8 +51,14 @@ int main(int argc, char **argv) {
       N = (uint32_t)strtoul(argv[++i], NULL, 10);
     } else if (strcmp(argv[i], "--k") == 0 && i + 1 < argc) {
       K = (uint32_t)strtoul(argv[++i], NULL, 10);
+    } else if (strcmp(argv[i], "--rows") == 0 && i + 1 < argc) {
+      rows = (uint32_t)strtoul(argv[++i], NULL, 10);
+    } else if (strcmp(argv[i], "--cols") == 0 && i + 1 < argc) {
+      cols = (uint32_t)strtoul(argv[++i], NULL, 10);
     } else if (strcmp(argv[i], "--metal") == 0 && i + 1 < argc) {
       metal_path = argv[++i];
+    } else if (strcmp(argv[i], "--json") == 0 && i + 1 < argc) {
+      json_path = argv[++i];
     }
   }
 
@@ -84,13 +93,11 @@ int main(int argc, char **argv) {
     bwpp_cpu_matmul_f32(a, b, c, M, N, K, K, N, N, bias, 0, 0);
   }
   double t1 = now_sec();
-  double secs = t1 - t0;
+  double matmul_secs = t1 - t0;
   double flops = 2.0 * (double)M * (double)N * (double)K * (double)iters;
+  double matmul_gflops = (flops / 1e9) / (matmul_secs > 0.0 ? matmul_secs : 1.0);
   printf("matmul: M=%u N=%u K=%u iters=%u time=%.6fs gflops=%.2f\n",
-         M, N, K, iters, secs, (flops / 1e9) / secs);
-
-  uint32_t rows = 256;
-  uint32_t cols = 256;
+         M, N, K, iters, matmul_secs, matmul_gflops);
   float *x = (float *)malloc(sizeof(float) * rows * cols);
   float *y = (float *)malloc(sizeof(float) * rows * cols);
   float *z = (float *)malloc(sizeof(float) * rows * cols);
@@ -121,14 +128,34 @@ int main(int argc, char **argv) {
     bwpp_cpu_softmax_f32(x, y, rows, cols, cols);
   }
   t1 = now_sec();
-  printf("softmax: rows=%u cols=%u iters=%u time=%.6fs\n", rows, cols, iters, t1 - t0);
+  double softmax_secs = t1 - t0;
+  printf("softmax: rows=%u cols=%u iters=%u time=%.6fs\n", rows, cols, iters, softmax_secs);
 
   t0 = now_sec();
   for (uint32_t i = 0; i < iters; ++i) {
     bwpp_cpu_rmsnorm_f32(x, z, gamma, NULL, rows, cols, cols, 1e-5f);
   }
   t1 = now_sec();
-  printf("rmsnorm: rows=%u cols=%u iters=%u time=%.6fs\n", rows, cols, iters, t1 - t0);
+  double rmsnorm_secs = t1 - t0;
+  printf("rmsnorm: rows=%u cols=%u iters=%u time=%.6fs\n", rows, cols, iters, rmsnorm_secs);
+
+  if (json_path) {
+    FILE *jf = fopen(json_path, "w");
+    if (!jf) {
+      fprintf(stderr, "bench: failed to write json %s\n", json_path);
+    } else {
+      fprintf(jf,
+              "{\n"
+              "  \"matmul\": {\"M\": %u, \"N\": %u, \"K\": %u, \"iters\": %u, \"time_s\": %.9f, \"gflops\": %.3f},\n"
+              "  \"softmax\": {\"rows\": %u, \"cols\": %u, \"iters\": %u, \"time_s\": %.9f},\n"
+              "  \"rmsnorm\": {\"rows\": %u, \"cols\": %u, \"iters\": %u, \"time_s\": %.9f}\n"
+              "}\n",
+              M, N, K, iters, matmul_secs, matmul_gflops,
+              rows, cols, iters, softmax_secs,
+              rows, cols, iters, rmsnorm_secs);
+      fclose(jf);
+    }
+  }
 
   free(a);
   free(b);
